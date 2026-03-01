@@ -38,10 +38,8 @@ from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime
 from sqlalchemy.orm import sessionmaker, relationship, declarative_base
 from sqlalchemy.dialects.postgresql import UUID
 
-try:
-    from src.services.ai_parser import AIParser
-except ImportError:
-    from services.ai_parser import AIParser
+# AIParser is lazy-imported in __init__ to avoid google.generativeai hang
+AIParser = None
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 Base = declarative_base()
@@ -136,7 +134,21 @@ class IsbankMaximumGencScraper:
         self.engine = create_engine(DATABASE_URL)
         Session = sessionmaker(bind=self.engine)
         self.db = Session()
-        self.parser = AIParser()
+        
+        # Lazy import of AIParser to avoid google.generativeai hanging at module import time
+        try:
+            from src.services.ai_parser import AIParser as _AIParser
+            print("[DEBUG] AIParser lazy-imported via src.services")
+        except ImportError:
+            try:
+                from services.ai_parser import AIParser as _AIParser
+                print("[DEBUG] AIParser lazy-imported via services")
+            except ImportError as e:
+                print(f"[DEBUG] AIParser import FAILED: {e}")
+                raise
+        self.parser = _AIParser()
+        print("[DEBUG] AIParser initialized")
+
         self.page = None
         self.browser = None
         self.playwright = None
