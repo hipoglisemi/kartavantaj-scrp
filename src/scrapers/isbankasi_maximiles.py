@@ -429,30 +429,48 @@ class IsbankMaximilesScraper:
             content_parts = []
             
             # Find all containers that might have content
-            containers = soup.select(".page-content, section div.container, .detail-text, .campaign-content, .text-area")
+            # Added 'table' and lowered threshold to be more inclusive
+            selectors = [".page-content", "section div.container", ".detail-text", ".campaign-content", ".text-area", "table"]
             
-            for container in containers:
-                text = container.get_text(separator="\n", strip=True)
-                # Filter out breadcrumbs and short fragments
-                if len(text) > 400 and "Ana Sayfa" not in text[:100]:
-                    # Check if this part is already added to avoid duplicates
-                    if not any(text[:100] in p for p in content_parts):
-                        content_parts.append(text)
+            for sel in selectors:
+                containers = soup.select(sel)
+                for container in containers:
+                    text = container.get_text(separator="\n", strip=True)
+                    # Filter out breadcrumbs and very short fragments
+                    # Lowered threshold from 400 to 150 to catch shorter condition blocks
+                    if len(text) > 150 and "Ana Sayfa" not in text[:80] and "Maximum Mobil" not in text[:50]:
+                        # Check if this part is already substantially covered
+                        is_duplicate = False
+                        for existing_part in content_parts:
+                            if text[:100] in existing_part or existing_part[:100] in text:
+                                is_duplicate = True
+                                break
+                        if not is_duplicate:
+                            content_parts.append(text)
 
-            # Fallback to all sections if nothing significant found
+            # Fallback to all sections/divs if nothing significant found
             if not content_parts:
-                sections = soup.select("section")
-                for s in sections:
-                    t = s.get_text(separator="\n", strip=True)
-                    if len(t) > 300 and "Üzgünüz" not in t:
+                candidate_tags = soup.find_all(["section", "div"], recursive=False)
+                if not candidate_tags:
+                    # If recursive false finds nothing, try deeper
+                    candidate_tags = soup.find_all(["section", "div"])
+                    
+                for tag in candidate_tags:
+                    t = tag.get_text(separator="\n", strip=True)
+                    if len(t) > 200 and "Üzgünüz" not in t and "Ana Sayfa" not in t[:50]:
                         content_parts.append(t)
 
             # Join all parts
             full_text = "\n\n".join(content_parts)
             
             # Clean up conditions by splitting into lines
-            conditions = [self._clean(line) for line in full_text.split("\n") 
-                         if len(self._clean(line)) > 25 and not line.startswith("Copyright")]
+            # Ensure we don't accidentally join everything into one line in _clean
+            lines = full_text.split("\n")
+            conditions = []
+            for line in lines:
+                cleaned = self._clean(line)
+                if len(cleaned) > 20 and not cleaned.startswith("Copyright"):
+                    conditions.append(cleaned)
 
             return {
                 "title": title, 
@@ -639,7 +657,7 @@ class IsbankMaximilesScraper:
             traceback.print_exc()
             return "error"
 
-    def run(self, limit: Optional[int] = None):
+    def run(self, limit: Optional[int] = None, urls: Optional[List[str]] = None):
         try:
             print("🚀 Starting İşbankası Maximiles Scraper (Playwright)...")
             self._start_browser()
@@ -649,7 +667,12 @@ class IsbankMaximilesScraper:
                 self.db.commit()
                 self.db.close()
                 
-            active_urls, expired_urls = self._fetch_campaign_urls(limit=limit)
+            if urls:
+                print(f"🎯 Running specific URLs: {len(urls)}")
+                active_urls = urls
+                expired_urls = []
+            else:
+                active_urls, expired_urls = self._fetch_campaign_urls(limit=limit)
             
             # Evaluate expired campaigns logic
             if expired_urls:
@@ -701,7 +724,12 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of campaigns to scrape")
+    parser.add_argument("--urls", type=str, default=None, help="Comma separated list of URLs to scrape")
     args = parser.parse_args()
     
+    url_list = None
+    if args.urls:
+        url_list = [u.strip() for u in args.urls.split(",") if u.strip()]
+        
     scraper = IsbankMaximilesScraper()
-    scraper.run(limit=args.limit)
+    scraper.run(limit=args.limit, urls=url_list)
