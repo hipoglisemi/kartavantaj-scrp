@@ -75,6 +75,8 @@ BANK_RULES = {
       4. Fallback: If no button/SMS/app is mentioned but there is a clear instruction like "Kampanya detaylarını inceleyin", write exactly that instruction.
     - 🚨 STRICT APP NAMES: ONLY use "Maximum Mobil", "İşCep", or "Pazarama".
     - ⛔ NEGATIVE CONSTRAINT: NEVER use "World Mobil", "Jüzdan", "BonusFlaş", "Yapı Kredi". If you see these, it's a hallucination or cross-promotion; ignore them.
+- 🚨 DISCOUNT CODES: If there is an "İndirim Kodu" (e.g., TRBAN25, TROY2024), **MUTLAKA** both 'conditions' listesine ekle hem de 'description' içinde belirt.
+- 🚨 DETAIL LEVEL: DO NOT summarize heavily. Keep all specific rules about minimum spend, exclusions, and merchant types.
 """,
     'vakıfbank': """
 🚨 VAKIFBANK/WORLD SPECIFIC RULES:
@@ -428,9 +430,9 @@ VALID SECTORS (BİRİNİ SEÇ — SADECE bu listeden):
     - "Peşin fiyatına" gibi detayları yazma, sadece "150 TL Puan", "+4 Taksit", "%20 İndirim" yaz.
     - Eğer "100 TL Worldpuan" diyorsa "100 TL Worldpuan" yaz. (Değer + Tür)
 6. **CONDITIONS**: 
-    - Metindeki koşulları madde madde özetle.
-    - 🚨 TEKRAR KURALI: Eğer bir bilgi zaten 'start_date', 'end_date', 'cards', 'participation' veya 'sectors' alanlarına çekilmişse, bu bilgiyi tekrar 'conditions' listesine EKLEME. 
-    - Örnek: "Kampanya 1-31 Ocak tarihleri arasında geçerlidir" cümlesi zaten tarihlerde olduğu için buraya ekleme.
+    - Metindeki tüm önemli kullanım koşullarını, kısıtlamaları ve istisnaları madde madde çıkar.
+    - 🚨 ÖZETLEME YASAĞI: Koşulları aşırı özetleme, kritik nüansları (ör. "X hariç", "Y dahil", "Z kodlu") koru.
+    - 🚨 TEKRAR KURALI: Eğer bir bilgi zaten 'start_date', 'end_date', 'cards', 'participation' veya 'sectors' alanlarına çekilmişse, bu bilgiyi tekrar 'conditions' listesine EKLEME. (Tarih ve kart isimleri hariç, kuralın kendisi önemliyse eklenebilir).
     - Sadece ek koşulları, limitleri ve kısıtlamaları buraya yaz.
 7. **DATES (KRİTİK)**: 
     - Tüm tarihleri 'YYYY-MM-DD' formatında ver.

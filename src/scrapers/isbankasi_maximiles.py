@@ -429,8 +429,8 @@ class IsbankMaximilesScraper:
             content_parts = []
             
             # Find all containers that might have content
-            # Added 'table' and lowered threshold to be more inclusive
-            selectors = [".page-content", "section div.container", ".detail-text", ".campaign-content", ".text-area", "table"]
+            # Added '.content' and '.content-part' based on browser inspection
+            selectors = [".page-content", "section div.container", ".detail-text", ".campaign-content", ".text-area", ".content", ".content-part", "table"]
             
             for sel in selectors:
                 containers = soup.select(sel)
@@ -541,13 +541,17 @@ class IsbankMaximilesScraper:
             counter += 1
         return slug
 
-    def _process_campaign(self, url: str) -> str:
+    def _process_campaign(self, url: str, force: bool = False) -> str:
         existing = self.db.query(Campaign).filter(
             Campaign.tracking_url == url, Campaign.card_id == self.card_id
         ).first()
-        if existing:
+        
+        if existing and not force:
             print("   ⏭️  Skipped (Already exists)")
             return "skipped"
+        
+        if existing and force:
+            print(f"   🔄 Updating existing campaign: {existing.title}")
 
         print(f"🔍 Processing: {url}")
         data = self._extract_campaign_data(url)
@@ -600,22 +604,40 @@ class IsbankMaximilesScraper:
                 conds.insert(0, f"KATILIM: {part}")
             final_conditions = "\n".join(conds)
 
-            campaign = Campaign(
-                card_id=self.card_id, sector_id=sector.id if sector else None,
-                slug=slug, title=formatted_title,
-                description=ai_data.get("description") or data["title"][:200],
-                reward_text=ai_data.get("reward_text"),
-                reward_value=ai_data.get("reward_value"),
-                reward_type=ai_data.get("reward_type"),
-                conditions=final_conditions,
-                eligible_cards=", ".join(ai_data.get("cards", [])) or None,
-                image_url=data["image_url"],
-                start_date=start_date, end_date=end_date,
-                is_active=True, tracking_url=url,
-                created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
-            )
-            self.db.add(campaign)
-            self.db.commit()
+            if existing:
+                # Update existing record
+                existing.sector_id = sector.id if sector else None
+                existing.title = formatted_title
+                existing.description = ai_data.get("description") or data["title"][:200]
+                existing.reward_text = ai_data.get("reward_text")
+                existing.reward_value = ai_data.get("reward_value")
+                existing.reward_type = ai_data.get("reward_type")
+                existing.conditions = final_conditions
+                existing.eligible_cards = ", ".join(ai_data.get("cards", [])) or None
+                existing.image_url = data["image_url"]
+                existing.start_date = start_date
+                existing.end_date = end_date
+                existing.updated_at = datetime.utcnow()
+                self.db.commit()
+                print(f"   ✅ Updated: {existing.title[:50]}")
+            else:
+                campaign = Campaign(
+                    card_id=self.card_id, sector_id=sector.id if sector else None,
+                    slug=slug, title=formatted_title,
+                    description=ai_data.get("description") or data["title"][:200],
+                    reward_text=ai_data.get("reward_text"),
+                    reward_value=ai_data.get("reward_value"),
+                    reward_type=ai_data.get("reward_type"),
+                    conditions=final_conditions,
+                    eligible_cards=", ".join(ai_data.get("cards", [])) or None,
+                    image_url=data["image_url"],
+                    start_date=start_date, end_date=end_date,
+                    is_active=True, tracking_url=url,
+                    created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+                )
+                self.db.add(campaign)
+                self.db.commit()
+                print(f"   ✅ Saved: {campaign.title[:50]}")
 
             # Brands
             for b_name in ai_data.get("brands", []):
@@ -657,7 +679,7 @@ class IsbankMaximilesScraper:
             traceback.print_exc()
             return "error"
 
-    def run(self, limit: Optional[int] = None, urls: Optional[List[str]] = None):
+    def run(self, limit: Optional[int] = None, urls: Optional[List[str]] = None, force: bool = False):
         try:
             print("🚀 Starting İşbankası Maximiles Scraper (Playwright)...")
             self._start_browser()
@@ -698,7 +720,7 @@ class IsbankMaximilesScraper:
             for i, url in enumerate(urls, 1):
                 print(f"\n[{i}/{len(urls)}]")
                 try:
-                    res = self._process_campaign(url)
+                    res = self._process_campaign(url, force=force)
                     if res == "saved":
                         success += 1
                     elif res == "skipped":
@@ -725,6 +747,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=None, help="Limit the number of campaigns to scrape")
     parser.add_argument("--urls", type=str, default=None, help="Comma separated list of URLs to scrape")
+    parser.add_argument("--force", action="store_true", help="Force update existing campaigns")
     args = parser.parse_args()
     
     url_list = None
@@ -732,4 +755,4 @@ if __name__ == "__main__":
         url_list = [u.strip() for u in args.urls.split(",") if u.strip()]
         
     scraper = IsbankMaximilesScraper()
-    scraper.run(limit=args.limit, urls=url_list)
+    scraper.run(limit=args.limit, urls=url_list, force=args.force)
