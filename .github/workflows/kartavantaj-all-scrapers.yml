@@ -1,10 +1,12 @@
 name: Kartavantaj Auto Scrapers
 
+run-name: "Scraper: ${{ github.event.inputs.scraper || 'Tümü (Zamanlı)' }}"
+
 on:
   workflow_dispatch:
     inputs:
       scraper:
-        description: 'Çalıştırılacak scraper (boş bırakırsan tümü çalışır)'
+        description: 'Çalıştırılacak scraper (boş = tümü)'
         required: false
         default: 'all'
         type: choice
@@ -42,15 +44,40 @@ jobs:
   scrape:
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false  # CRITICAL: Ensures that if one scraper fails, the rest continue to run
+      fail-fast: false
       matrix:
-        scraper: ${{ 
-          (github.event_name == 'workflow_dispatch' && github.event.inputs.scraper != 'all') 
-          && fromJson(format('["{0}"]', github.event.inputs.scraper))
-          || fromJson('["akbank_axess","akbank_business","akbank_free","akbank_wings","chippin","denizbank","enpara","garanti_milesandsmiles","garanti_shopandfly","isbankasi_genc","isbankasi_maximiles","isbankasi_maximum","paraf","paraf_genc","qnb","teb","turkiyefinans","vakifbank","yapikredi_adios","yapikredi_crystal","yapikredi_play","yapikredi_world","ziraat"]')
-        }}
+        scraper:
+          - akbank_axess
+          - akbank_business
+          - akbank_free
+          - akbank_wings
+          - chippin
+          - denizbank
+          - enpara
+          - garanti_milesandsmiles
+          - garanti_shopandfly
+          - isbankasi_genc
+          - isbankasi_maximiles
+          - isbankasi_maximum
+          - paraf
+          - paraf_genc
+          - qnb
+          - teb
+          - turkiyefinans
+          - vakifbank
+          - yapikredi_adios
+          - yapikredi_crystal
+          - yapikredi_play
+          - yapikredi_world
+          - ziraat
 
-    name: Run ${{ matrix.scraper }} Scraper
+    # Skip job if manual trigger with a specific scraper selected and it doesn't match
+    if: >
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.scraper == 'all' ||
+      github.event.inputs.scraper == matrix.scraper
+
+    name: "🤖 ${{ matrix.scraper }}"
 
     steps:
     - uses: actions/checkout@v4
@@ -81,5 +108,4 @@ jobs:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        # Run with Virtual Display to support both Selenium and Playwright
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python -m src.scrapers.${{ matrix.scraper }}
