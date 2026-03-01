@@ -451,6 +451,7 @@ class IsbankMaximumScraper:
                 bank_name=self.BANK_NAME,
             ) or {}
         except Exception as e:
+            self.db.rollback()
             print(f"   ⚠️ AI parse error: {e}")
             ai_data = {}
 
@@ -525,18 +526,30 @@ class IsbankMaximumScraper:
                 if len(b_name) < 2:
                     continue
                 b_slug = re.sub(r'[^a-z0-9]+', '-', b_name.lower()).strip('-')
-                brand = self.db.query(Brand).filter(Brand.slug == b_slug).first()
-                if not brand:
-                    brand = Brand(name=b_name, slug=b_slug)
-                    self.db.add(brand)
-                    self.db.commit()
-                link = self.db.query(CampaignBrand).filter(
-                    CampaignBrand.campaign_id == campaign.id,
-                    CampaignBrand.brand_id == brand.id
-                ).first()
-                if not link:
-                    self.db.add(CampaignBrand(campaign_id=campaign.id, brand_id=brand.id))
-                    self.db.commit()
+                
+                try:
+                    brand = self.db.query(Brand).filter(Brand.slug == b_slug).first()
+                    if not brand:
+                        brand = Brand(name=b_name, slug=b_slug)
+                        self.db.add(brand)
+                        self.db.commit()
+                except Exception as e:
+                    self.db.rollback()
+                    print(f"   ⚠️ Brand save failed for {b_name}: {e}")
+                    continue
+
+                try:    
+                    link = self.db.query(CampaignBrand).filter(
+                        CampaignBrand.campaign_id == campaign.id,
+                        CampaignBrand.brand_id == brand.id
+                    ).first()
+                    if not link:
+                        self.db.add(CampaignBrand(campaign_id=campaign.id, brand_id=brand.id))
+                        self.db.commit()
+                except Exception as e:
+                    self.db.rollback()
+                    print(f"   ⚠️ CampaignBrand link failed: {e}")
+                    continue
 
             print(f"   ✅ Saved: {campaign.title[:50]}")
             return "saved"
