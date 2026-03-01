@@ -96,6 +96,8 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python src/scrapers/${{ matrix.scraper }}.py
+
 
