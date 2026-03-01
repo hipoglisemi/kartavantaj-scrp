@@ -1,6 +1,6 @@
 name: Kartavantaj Auto Scrapers
 
-run-name: "Scraper: ${{ github.event.inputs.scraper || 'Tümü (Zamanlı)' }}"
+run-name: "🤖 Scraper: ${{ github.event.inputs.scraper || 'Tümü (Zamanlı)' }}"
 
 on:
   workflow_dispatch:
@@ -41,41 +41,30 @@ on:
     - cron: '0 12 * * *'  # TSİ 15:00 (UTC 12:00)
 
 jobs:
+  # Step 1: Compute which scrapers to run
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      scrapers: ${{ steps.set-matrix.outputs.scrapers }}
+    steps:
+      - id: set-matrix
+        run: |
+          ALL='["akbank_axess","akbank_business","akbank_free","akbank_wings","chippin","denizbank","enpara","garanti_milesandsmiles","garanti_shopandfly","isbankasi_genc","isbankasi_maximiles","isbankasi_maximum","paraf","paraf_genc","qnb","teb","turkiyefinans","vakifbank","yapikredi_adios","yapikredi_crystal","yapikredi_play","yapikredi_world","ziraat"]'
+          INPUT="${{ github.event.inputs.scraper }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
+            echo "scrapers=$ALL" >> $GITHUB_OUTPUT
+          else
+            echo "scrapers=[\"$INPUT\"]" >> $GITHUB_OUTPUT
+          fi
+
+  # Step 2: Run selected scrapers in parallel
   scrape:
+    needs: setup
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        scraper:
-          - akbank_axess
-          - akbank_business
-          - akbank_free
-          - akbank_wings
-          - chippin
-          - denizbank
-          - enpara
-          - garanti_milesandsmiles
-          - garanti_shopandfly
-          - isbankasi_genc
-          - isbankasi_maximiles
-          - isbankasi_maximum
-          - paraf
-          - paraf_genc
-          - qnb
-          - teb
-          - turkiyefinans
-          - vakifbank
-          - yapikredi_adios
-          - yapikredi_crystal
-          - yapikredi_play
-          - yapikredi_world
-          - ziraat
-
-    # Skip job if manual trigger with a specific scraper selected and it doesn't match
-    if: >
-      github.event_name != 'workflow_dispatch' ||
-      github.event.inputs.scraper == 'all' ||
-      github.event.inputs.scraper == matrix.scraper
+        scraper: ${{ fromJson(needs.setup.outputs.scrapers) }}
 
     name: "🤖 ${{ matrix.scraper }}"
 
