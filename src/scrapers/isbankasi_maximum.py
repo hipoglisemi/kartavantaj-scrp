@@ -1,10 +1,6 @@
-"""
-İşbankası Maximum Scraper
-Powered by Playwright (GitHub Actions compatible, Cloudflare-resistant)
-"""
 
-import os
 import sys
+import os
 import time
 import re
 import uuid
@@ -14,18 +10,25 @@ from typing import Optional, Dict, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-# Path setup
+# Path setup - same as ziraat.py
 current_dir = os.path.dirname(os.path.abspath(__file__))  # src/scrapers
 project_root = os.path.dirname(os.path.dirname(current_dir))  # project root
 if project_root not in sys.path:
-    sys.path.append(project_root)
+    sys.path.insert(0, project_root)
+# Also add src dir for relative imports
+src_dir = os.path.dirname(current_dir)
+if src_dir not in sys.path:
+    sys.path.insert(1, src_dir)
 
-# Load env
+print(f"[DEBUG] project_root: {project_root}")
+print(f"[DEBUG] sys.path[:3]: {sys.path[:3]}")
+
+# Load Env - same pattern as ziraat.py
 try:
     from dotenv import load_dotenv
-    load_dotenv(os.path.join(project_root, '.env'))
-except Exception:
-    pass
+    load_dotenv()
+except Exception as e:
+    print(f"[DEBUG] dotenv load failed: {e}")
 try:
     with open(os.path.join(project_root, '.env'), 'r') as f:
         for line in f:
@@ -42,10 +45,18 @@ from sqlalchemy.dialects.postgresql import UUID
 
 try:
     from src.services.ai_parser import AIParser
+    print("[DEBUG] AIParser imported via src.services")
 except ImportError:
-    from services.ai_parser import AIParser
+    try:
+        from services.ai_parser import AIParser
+        print("[DEBUG] AIParser imported via services")
+    except ImportError as e:
+        print(f"[DEBUG] AIParser import FAILED: {e}")
+        raise
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+print(f"[DEBUG] DATABASE_URL set: {'YES' if DATABASE_URL else 'NO'}")
+
 
 Base = declarative_base()
 
