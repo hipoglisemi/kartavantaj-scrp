@@ -151,21 +151,46 @@ class IsbankMaximumScraper:
         self._init_card()
 
     def _init_card(self):
+        # Search with multiple slug/name variants
         bank = self.db.query(Bank).filter(
-            (Bank.slug == 'isbankasi') | (Bank.name.ilike('%İş Bank%'))
+            Bank.slug.in_([
+                'isbankasi', 'is-bankasi', 'isbank', 'turkiye-is-bankasi',
+                'turkiye-is-bankasi-as', 'is-bankasi-as'
+            ])
         ).first()
         if not bank:
-            raise ValueError("İşbankası not found in DB")
+            bank = self.db.query(Bank).filter(
+                Bank.name.ilike('%İş Bank%') | Bank.name.ilike('%İşbank%') | Bank.name.ilike('%Isbank%')
+            ).first()
+        if not bank:
+            print(f"⚠️  İşbankası not found in DB, creating...")
+            bank = Bank(name='İş Bankası', slug='isbankasi')
+            self.db.add(bank)
+            self.db.commit()
+
+        print(f"✅ Bank: {bank.name} (ID: {bank.id}, slug: {bank.slug})")
 
         card = self.db.query(Card).filter(
-            Card.slug == self.CARD_SLUG,
-            Card.bank_id == bank.id
+            Card.slug == self.CARD_SLUG
         ).first()
         if not card:
-            raise ValueError(f"Card '{self.CARD_SLUG}' not found in DB")
+            card = self.db.query(Card).filter(
+                Card.name.ilike(f'%{self.CARD_SLUG.replace("-", " ")}%'),
+                Card.bank_id == bank.id
+            ).first()
+        if not card:
+            print(f"⚠️  Card '{self.CARD_SLUG}' not found, creating...")
+            card_name = {
+                'maximum': 'Maximum', 'maximiles': 'Maximiles',
+                'maximum-genc': 'Maximum Genç'
+            }.get(self.CARD_SLUG, self.CARD_SLUG.title())
+            card = Card(bank_id=bank.id, name=card_name, slug=self.CARD_SLUG, is_active=True)
+            self.db.add(card)
+            self.db.commit()
 
         self.card_id = card.id
-        print(f"✅ Card: {self.BANK_NAME} {card.name} (ID: {self.card_id})")
+        print(f"✅ Card: {card.name} (ID: {self.card_id}, slug: {card.slug})")
+
 
     def _start_browser(self):
         from playwright.sync_api import sync_playwright
