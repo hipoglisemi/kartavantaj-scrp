@@ -145,17 +145,17 @@ class IsbankMaximumGencScraper:
     def _init_card(self):
         bank = self.db.query(Bank).filter(
             Bank.slug.in_([
-                'isbankasi', 'is-bankasi', 'isbank', 'turkiye-is-bankasi',
-                'turkiye-is-bankasi-as', 'is-bankasi-as'
+                'isbank',  # gerçek slug (seed.ts)
+                'isbankasi', 'is-bankasi', 'turkiye-is-bankasi',
             ])
         ).first()
         if not bank:
             bank = self.db.query(Bank).filter(
-                Bank.name.ilike('%İş Bank%') | Bank.name.ilike('%İşbank%') | Bank.name.ilike('%Isbank%')
+                Bank.name.ilike('%İş Bank%') | Bank.name.ilike('%İşbank%')
             ).first()
         if not bank:
             print(f"⚠️  İşbankası not found in DB, creating...")
-            bank = Bank(name='İş Bankası', slug='isbankasi')
+            bank = Bank(name='İş Bankası', slug='isbank')
             self.db.add(bank)
             self.db.commit()
         print(f"✅ Bank: {bank.name} (ID: {bank.id}, slug: {bank.slug})")
@@ -163,20 +163,17 @@ class IsbankMaximumGencScraper:
         card = self.db.query(Card).filter(Card.slug == self.CARD_SLUG).first()
         if not card:
             card = self.db.query(Card).filter(
-                Card.name.ilike(f'%{self.CARD_SLUG.replace("-", " ")}%'),
+                Card.name.ilike('%Maximum Gen%'),
                 Card.bank_id == bank.id
             ).first()
         if not card:
             print(f"⚠️  Card '{self.CARD_SLUG}' not found, creating...")
-            card_name = {
-                'maximum': 'Maximum', 'maximiles': 'Maximiles',
-                'maximum-genc': 'Maximum Genç'
-            }.get(self.CARD_SLUG, self.CARD_SLUG.title())
-            card = Card(bank_id=bank.id, name=card_name, slug=self.CARD_SLUG, is_active=True)
+            card = Card(bank_id=bank.id, name='Maximum Genç Card', slug=self.CARD_SLUG, is_active=True)
             self.db.add(card)
             self.db.commit()
         self.card_id = card.id
         print(f"✅ Card: {card.name} (ID: {self.card_id}, slug: {card.slug})")
+
 
 
     def _start_browser(self):
