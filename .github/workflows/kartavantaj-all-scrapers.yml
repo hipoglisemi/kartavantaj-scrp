@@ -12,8 +12,6 @@ on:
         type: choice
         options:
           - all
-          - akbank_axess
-          - akbank_business
           - akbank_free
           - akbank_wings
           - chippin
@@ -35,6 +33,11 @@ on:
           - yapikredi_play
           - yapikredi_world
           - ziraat
+      limit:
+        description: 'İşbankası için limit (örn: 5), boş bırakılırsa limitsiz çalışır'
+        required: false
+        type: string
+        default: ''
 
   schedule:
     - cron: '0 0 * * *'   # TSİ 03:00 (UTC 00:00)
@@ -103,8 +106,13 @@ jobs:
         Xvfb :99 -screen 0 1920x1080x24 &
         sleep 2
         
-        if [[ "${{ matrix.scraper }}" == isbankasi_* ]]; then
-          python -u src/scrapers/${{ matrix.scraper }}.py --limit 5
+        LIMIT_ARG=""
+        if [ -n "${{ github.event.inputs.limit }}" ]; then
+          LIMIT_ARG="--limit ${{ github.event.inputs.limit }}"
+        fi
+        
+        if [[ "${{ matrix.scraper }}" == isbankasi_* ]] && [ -n "$LIMIT_ARG" ]; then
+          python -u src/scrapers/${{ matrix.scraper }}.py $LIMIT_ARG
         else
           python -u src/scrapers/${{ matrix.scraper }}.py
         fi
