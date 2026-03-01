@@ -1,0 +1,40 @@
+{
+  "name": "kartavantaj-scraper",
+  "version": "1.0.0",
+  "description": "Campaign scraper for KartAvantaj",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "scrape:worldcard": "tsx src/scrapers/worldcard.ts",
+    "fix:brands": "tsx scripts/sync_brands.ts",
+    "fix:titles": "tsx scripts/restore_titles.ts",
+    "scrape:maximum:py": "python3 -u src/scrapers/isbankasi/maximum.py",
+    "import:maximum": "tsx import_maximum_json.ts",
+    "scrape:maximum:full": "npm run scrape:maximum:py && npm run import:maximum",
+    "scrape:maximum:v3": "tsx src/scrapers/isbankasi/maximum-v3.ts",
+    "scrape:maximum:links": "python3 -u src/scrapers/isbankasi/maximum-links.py",
+    "scrape:maximum:v4": "npm run scrape:maximum:links && tsx src/scrapers/isbankasi/maximum-v4.ts",
+    "scrape:maximiles": "tsx -r dotenv/config src/scrapers/isbankasi/maximiles.ts",
+    "scrape:teb": "tsx -r dotenv/config src/scrapers/teb/teb.ts",
+    "scrape:chippin": "tsx src/scrapers/chippin/chippin.ts"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.39.0",
+    "@upstash/redis": "^1.36.1",
+    "axios": "^1.13.2",
+    "cheerio": "^1.1.2",
+    "dotenv": "^16.3.1",
+    "puppeteer": "^24.34.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
