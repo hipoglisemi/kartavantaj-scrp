@@ -708,5 +708,10 @@ class IsbankMaximumScraper:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=None, help="Limit the number of campaigns to scrape")
+    args = parser.parse_args()
+    
     scraper = IsbankMaximumScraper()
-    scraper.run()
+    scraper.run(limit=args.limit)

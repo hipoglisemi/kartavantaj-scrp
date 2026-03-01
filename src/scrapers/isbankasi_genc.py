@@ -196,24 +196,48 @@ class IsbankMaximumGencScraper:
     def _start_browser(self):
         from playwright.sync_api import sync_playwright
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox",
-                  "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080",
-                  "--disable-blink-features=AutomationControlled",
-                  "--disable-extensions", "--disable-web-security"]
-        )
-        context = self.browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            locale="tr-TR",
-            timezone_id="Europe/Istanbul",
-            extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"}
-        )
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        self.page = context.new_page()
-        self.page.set_default_timeout(120000)
-        print("✅ Playwright browser started.")
+        
+        is_ci = os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true"
+        connected = False
+
+        if not is_ci:
+            try:
+                print("   🔌 Attempting to connect to local Chrome debug instance at http://localhost:9222...")
+                self.browser = self.playwright.chromium.connect_over_cdp("http://localhost:9222")
+                connected = True
+                print("   ✅ Connected to local existing Chrome instance")
+                
+                # Use existing context if available
+                if len(self.browser.contexts) > 0:
+                    context = self.browser.contexts[0]
+                else:
+                    context = self.browser.new_context()
+                    
+                self.page = context.new_page()
+                self.page.set_default_timeout(120000)
+                return
+            except Exception as e:
+                print(f"   ⚠️  Could not connect to debug Chrome, launching headless... ({e})")
+                
+        if not connected:
+            self.browser = self.playwright.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox",
+                      "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080",
+                      "--disable-blink-features=AutomationControlled",
+                      "--disable-extensions", "--disable-web-security"]
+            )
+            context = self.browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                locale="tr-TR",
+                timezone_id="Europe/Istanbul",
+                extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"}
+            )
+            context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            self.page = context.new_page()
+            self.page.set_default_timeout(120000)
+            print("✅ Playwright browser started.")
 
     def _stop_browser(self):
         try:
@@ -235,7 +259,7 @@ class IsbankMaximumGencScraper:
                 soup = BeautifulSoup(self.page.content(), "html.parser")
                 count = len([
                     a for a in soup.find_all("a", href=True)
-                    if "/kampanyalar/" in a["href"] and "gecmis" not in a["href"]
+                    if "kampanya" in a["href"].lower() and "gecmis" not in a["href"].lower()
                 ])
                 if count >= limit:
                     break
@@ -296,7 +320,7 @@ class IsbankMaximumGencScraper:
         for a in soup.find_all("a", href=True):
             href = a["href"].lower()
             if (
-                ("/kampanyalar/" in href or "kampanyalar/" in href)
+                "kampanya" in href
                 and "arsiv" not in href
                 and "gecmis" not in href
                 and "past" not in href
@@ -305,7 +329,7 @@ class IsbankMaximumGencScraper:
                 is_category_suffix = any(href.endswith(suffix) for suffix in excluded_suffixes)
                 is_common_page = "ozellikler" in href or "basvuru" in href or href.endswith("/kampanyalar")
                 
-                if not is_exact_category and not is_category_suffix and not is_common_page and len(href) > 25:
+                if not is_exact_category and not is_category_suffix and not is_common_page and len(href) > 15:
                     full_url = urljoin(self.BASE_URL, a["href"])
                     
                     # Sona ermiş kampanya tespiti
@@ -608,5 +632,10 @@ class IsbankMaximumGencScraper:
 
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=None, help="Limit the number of campaigns to scrape")
+    args = parser.parse_args()
+    
     scraper = IsbankMaximumGencScraper()
-    scraper.run()
+    scraper.run(limit=args.limit)
