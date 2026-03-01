@@ -102,7 +102,12 @@ jobs:
       run: |
         Xvfb :99 -screen 0 1920x1080x24 &
         sleep 2
-        python -u src/scrapers/${{ matrix.scraper }}.py
+        
+        if [[ "${{ matrix.scraper }}" == isbankasi_* ]]; then
+          python -u src/scrapers/${{ matrix.scraper }}.py --limit 5
+        else
+          python -u src/scrapers/${{ matrix.scraper }}.py
+        fi
 
 
 
