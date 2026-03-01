@@ -56,11 +56,11 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install selenium-stealth pyvirtualdisplay webdriver-manager undetected-chromedriver
+        pip install selenium-stealth pyvirtualdisplay webdriver-manager
         
     - name: Install Playwright Browsers
       run: |
-        playwright install chromium
+        playwright install chromium --with-deps
         
     - name: Run Scraper
       env:

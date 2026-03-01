@@ -1,5 +1,6 @@
 """
 İşbankası Maximum Genç Scraper
+Powered by Playwright (GitHub Actions compatible, Cloudflare-resistant)
 """
 
 import os
@@ -9,20 +10,6 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
-import sys
-
-# Virtual Display (for GitHub Actions / Headless)
-try:
-    from pyvirtualdisplay import Display
-    HAS_VIRTUAL_DISPLAY = True
-except ImportError:
-    HAS_VIRTUAL_DISPLAY = False
-
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 from src.database import get_db_session
 from src.models import Campaign, Card, Sector, Bank
@@ -31,19 +18,21 @@ from src.utils.slug_generator import generate_slug
 
 
 class IsbankMaximumGencScraper:
-    """İşbankası Maximum Genç card campaign scraper"""
-    
+    """İşbankası Maximum Genç card campaign scraper - Playwright based"""
+
     BASE_URL = "https://www.maximumgenc.com.tr"
     CAMPAIGNS_URL = "https://www.maximumgenc.com.tr/kampanyalar"
     BANK_NAME = "İşbankası"
     CARD_NAME = "Maximum Genç"
-    
+    DEFAULT_IMAGE_URL = "https://www.maximumgenc.com.tr/_assets/images/logo.png"
+
     def __init__(self):
-        self.driver = None
-        self.display = None
+        self.page = None
+        self.browser = None
+        self.playwright = None
         self.card_id = None
         self._init_card()
-    
+
     def _init_card(self):
         """Get Maximum Genç card ID from database"""
         with get_db_session() as db:
@@ -51,440 +40,367 @@ class IsbankMaximumGencScraper:
                 Bank.slug == "isbankasi",
                 Card.slug == "maximum-genc"
             ).first()
-            
+
             if not card:
-                raise ValueError(f"Card '{self.CARD_NAME}' from '{self.BANK_NAME}' not found in database. Run seed_sectors.py first.")
-            
+                raise ValueError(
+                    f"Card '{self.CARD_NAME}' from '{self.BANK_NAME}' not found in database. Run seed_sectors.py first."
+                )
+
             self.card_id = card.id
             print(f"✅ Found card: {self.BANK_NAME} {self.CARD_NAME} (ID: {self.card_id})")
-    
-    def _get_driver(self):
-        """Initialize Selenium driver - Using same robust logic as Maximiles"""
-        if sys.platform.startswith('linux') and HAS_VIRTUAL_DISPLAY:
-            print("   🖥️ Starting Virtual Display (Xvfb)...")
-            try:
-                self.display = Display(visible=0, size=(1920, 1080))
-                self.display.start()
-            except Exception as e:
-                print(f"   ⚠️ Failed to start virtual display: {e}")
 
-        if os.getenv('GITHUB_ACTIONS'):
-            try:
-                import undetected_chromedriver as uc
-                options = uc.ChromeOptions()
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-setuid-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
-                options.add_argument('--disable-software-rasterizer')
-                options.add_argument('--window-size=1920,1080')
-                # Add dummy user agent to prevent blocks in headless
-                options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                
-                # In Github Actions we let uc find the installed chrome
-                driver = uc.Chrome(options=options, headless=bool(not self.display))
-                print("✅ Connected to undetected_chromedriver (GitHub Actions mode)")
-                return driver
-            except Exception as e:
-                print(f"⚠️ Github Actions UC failed: {e}")
-                # Fallback to standard selenium headless if UC completely fails
-                try:
-                    from selenium import webdriver
-                    from selenium.webdriver.chrome.service import Service
-                    from webdriver_manager.chrome import ChromeDriverManager
-                    options = webdriver.ChromeOptions()
-                    if not self.display:
-                        options.add_argument('--headless=new')
-                    options.add_argument('--no-sandbox')
-                    options.add_argument('--disable-setuid-sandbox')
-                    options.add_argument('--disable-dev-shm-usage')
-                    options.add_argument('--disable-software-rasterizer')
-                    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-                    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-                    print("✅ Connected to standard headless chrome (Fallback)")
-                    return driver
-                except Exception as e2:
-                    raise Exception(f"All headless attempts failed. UC: {e}, Standard: {e2}")
+    def _start_browser(self):
+        """Launch Playwright browser"""
+        from playwright.sync_api import sync_playwright
+        self.playwright = sync_playwright().start()
+        self.browser = self.playwright.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--window-size=1920,1080",
+            ]
+        )
+        context = self.browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        self.page = context.new_page()
+        print("✅ Playwright browser started.")
 
+    def _stop_browser(self):
+        """Cleanup Playwright"""
         try:
-            print("🚀 Launching new Chrome instance (Maximum Genç) - Standard Driver...")
-            options = webdriver.ChromeOptions()
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--window-size=1920,1080')
-            options.add_argument('--start-maximized')
-            options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-            
-            # Using standard chromedriver
-            driver = webdriver.Chrome(options=options)
-            
-            print("✅ Launched new standard Chrome instance successfully!")
-            time.sleep(2)
-            return driver
-        except Exception as e:
-            print(f"⚠️ Standard Launch failed: {e}")
-            raise
-
+            if self.browser:
+                self.browser.close()
+            if self.playwright:
+                self.playwright.stop()
+        except Exception:
+            pass
 
     def _fetch_campaign_urls(self, limit: Optional[int] = None) -> List[str]:
         """Fetch all campaign URLs from the listing page."""
         print(f"📥 Fetching campaign list from {self.CAMPAIGNS_URL}...")
-        
-        self.driver.get(self.CAMPAIGNS_URL)
-        time.sleep(10) # Increased wait for stability
-        
-        # Infinite scroll
+
+        self.page.goto(self.CAMPAIGNS_URL, wait_until="networkidle", timeout=60000)
+        time.sleep(5)
+
         scroll_count = 0
         max_scrolls = 100
-        
-        try:
-            while True:
-                if limit and limit > 0:
-                    try:
-                        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-                        count = len([a for a in soup.find_all('a', href=True) 
-                                     if '/kampanyalar/' in a['href'] 
-                                     and 'gecmis' not in a['href']])
-                        if count >= limit:
-                            print(f"   ✅ Reached limit ({count} >= {limit}), stopping scroll.")
-                            break
-                    except Exception as e:
-                        print(f"   ⚠️ Error counting items: {e}")
 
-                scroll_count += 1
-                if scroll_count > max_scrolls:
-                    print("   ⚠️ Max scrolls reached.")
-                    break
-
+        while scroll_count < max_scrolls:
+            if limit and limit > 0:
                 try:
-                    # Scroll to bottom first to trigger potential visibility
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    time.sleep(1)
-                    
-                    # Try to find "Daha Fazla" button
-                    load_more_btn = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.CSS_SELECTOR, ".show-more-opportunity"))
-                    )
-                    
-                    if load_more_btn.is_displayed():
-                        # Try JS click to bypass overlays
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", load_more_btn)
-                        time.sleep(1)
-                        try:
-                            self.driver.execute_script("arguments[0].click();", load_more_btn)
-                        except:
-                            load_more_btn.click()
-                        
-                        time.sleep(3) # Wait for content load
-                        print(f"   ⏬ Loaded more campaigns (Scroll {scroll_count})...")
-                    else:
-                        print(f"   ℹ️ Load more button present but hidden (Scroll {scroll_count})")
-                        if scroll_count > 1: # Give it a chance if it's just loading
-                            break
-                except Exception as e:
-                    # Button not found - usually means end of list
-                    print(f"   ℹ️ Load more button not found (End of list?): {e}")
-                    break
-                
-        except Exception as e:
-            print(f"   ⚠️ Scroll loop ended/failed: {e}")
-        
-        # Extract campaign URLs
-        try:
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-        except:
-             print("   ⚠️ Could not get page source.")
-             return []
+                    soup = BeautifulSoup(self.page.content(), "html.parser")
+                    count = len([
+                        a for a in soup.find_all("a", href=True)
+                        if "/kampanyalar/" in a["href"]
+                        and "gecmis" not in a["href"]
+                    ])
+                    if count >= limit:
+                        print(f"   ✅ Reached limit ({count} >= {limit}), stopping.")
+                        break
+                except Exception:
+                    pass
 
-        excluded_keywords = ['gecmis', 'arsiv', 'tum-kampanyalar'] 
-        
+            try:
+                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(1)
+
+                # Try load more button
+                btn = self.page.query_selector(".show-more-opportunity")
+                if btn and btn.is_visible():
+                    btn.scroll_into_view_if_needed()
+                    time.sleep(1)
+                    try:
+                        btn.click()
+                    except Exception:
+                        self.page.evaluate(
+                            "arguments => arguments[0].click()",
+                            [btn]
+                        )
+                    time.sleep(3)
+                    scroll_count += 1
+                    print(f"   ⏬ Loaded more campaigns (Scroll {scroll_count})...")
+                else:
+                    print("   ℹ️ No more 'Load More' button (End of list).")
+                    break
+            except Exception as e:
+                print(f"   ℹ️ Load more button not found (End of list?): {e}")
+                break
+
+        soup = BeautifulSoup(self.page.content(), "html.parser")
+
+        excluded_keywords = ["gecmis", "arsiv", "tum-kampanyalar"]
+
         all_links = []
         found_count = 0
         skipped_count = 0
-        
-        # Target specific campaign cards
-        cards = soup.select('.opportunity-result a')
+
+        cards = soup.select(".opportunity-result a")
         print(f"   ℹ️ Found {len(cards)} campaign cards in DOM")
 
         for a in cards:
-            href = a.get('href')
-            if not href: continue
-             
-            # Debug logging
-            is_excluded = any(ex in href for ex in excluded_keywords)
-            
-            # Additional check: exclude javascript: links
-            if 'javascript' in href: is_excluded = True
-
+            href = a.get("href")
+            if not href:
+                continue
+            is_excluded = any(ex in href for ex in excluded_keywords) or "javascript" in href
             if is_excluded:
                 skipped_count += 1
             else:
-                full_url = urljoin(self.BASE_URL, href)
-                all_links.append(full_url)
+                all_links.append(urljoin(self.BASE_URL, href))
                 found_count += 1
-        
-        # Also try broad search as fallback if specific selector failed (e.g. layout change)
-        if len(all_links) == 0:
-             print("   ⚠️ No cards found with .opportunity-result, trying broad search...")
-             for a in soup.find_all('a', href=True):
-                href = a['href']
-                if '/kampanyalar/' in href and not any(ex in href for ex in excluded_keywords):
-                     full_url = urljoin(self.BASE_URL, href)
-                     all_links.append(full_url)
+
+        if not all_links:
+            print("   ⚠️ No cards found with .opportunity-result, trying broad search...")
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if "/kampanyalar/" in href and not any(ex in href for ex in excluded_keywords):
+                    all_links.append(urljoin(self.BASE_URL, href))
 
         unique_urls = list(dict.fromkeys(all_links))
-        
         print(f"   ℹ️ Links extracted: {len(unique_urls)}, Skipped: {skipped_count}")
-        
+
         if limit and limit > 0:
             unique_urls = unique_urls[:limit]
-        
+
         print(f"✅ Found {len(unique_urls)} unique campaigns to process")
         return unique_urls
-    
-    # Fallback image if scraping fails
-    DEFAULT_IMAGE_URL = "https://www.maximumgenc.com.tr/_assets/images/logo.png"
 
     def _extract_campaign_data(self, url: str) -> Optional[Dict[str, Any]]:
-        """Extract campaign data from detail page using a NEW TAB strategy."""
-        original_window = self.driver.current_window_handle
-        new_window = None
-        
+        """Extract campaign data from detail page."""
         try:
-            # Open new tab
-            self.driver.execute_script(f"window.open('{url}', '_blank');")
-            time.sleep(1)
-            
-            # Switch to new tab
-            new_window = [w for w in self.driver.window_handles if w != original_window][-1]
-            self.driver.switch_to.window(new_window)
-            
-            # Wait for content
+            self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            self.page.evaluate("window.scrollTo(0, 500)")
+            time.sleep(2)
+
             try:
-                # Scroll to trigger lazy load
-                self.driver.execute_script("window.scrollTo(0, 500);")
-                time.sleep(2.5)
-                WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "h1"))
-                )
-            except:
+                self.page.wait_for_selector("h1", timeout=8000)
+            except Exception:
                 print("   ⚠️ Page load timeout/error")
-            
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Title
-            title_el = soup.select_one('h1')
+
+            soup = BeautifulSoup(self.page.content(), "html.parser")
+
+            title_el = soup.select_one("h1")
             title = self._clean_text(title_el.text) if title_el else "Başlık Yok"
-            
-            # Expiration checks
-            if "gecmis" in url or "#gecmis" in url or "geçmiş" in title.lower() or "süresi doldu" in title.lower():
+
+            if (
+                "gecmis" in url or "#gecmis" in url
+                or "geçmiş" in title.lower()
+                or "süresi doldu" in title.lower()
+            ):
                 return None
 
-            # 1. Image (with Fallback)
+            # Image
             image_url = None
             try:
-                # Genç often uses header image or section image
-                img_el = soup.select_one('.detail-img img') or soup.select_one('section img')
+                img_el = soup.select_one(".detail-img img") or soup.select_one("section img")
                 if img_el:
-                    # Try specific lazy loading attributes first, then fallback to src
-                    src = img_el.get('data-original') or img_el.get('data-src') or img_el.get('src')
-                    if src and not src.startswith('data:'):
+                    src = img_el.get("data-original") or img_el.get("data-src") or img_el.get("src")
+                    if src and not src.startswith("data:"):
                         image_url = urljoin(self.BASE_URL, src)
-                
-                # Check background image style if needed
                 if not image_url:
-                     banner_section = soup.select_one('section.banner, div.banner')
-                     if banner_section and 'style' in banner_section.attrs:
-                        style = banner_section['style']
-                        match = re.search(r'url\([\'"]?(.*?)[\'"]?\)', style)
+                    banner = soup.select_one("section.banner, div.banner")
+                    if banner and "style" in banner.attrs:
+                        match = re.search(r"url\(['\"]?(.*?)['\"]?\)", banner["style"])
                         if match:
-                             image_url = urljoin(self.BASE_URL, match.group(1))
-
+                            image_url = urljoin(self.BASE_URL, match.group(1))
             except Exception as e:
                 print(f"   ⚠️ Image extraction error: {e}")
-            
-            # Use Fallback if no image found
+
             if not image_url:
                 print("   ⚠️ No image found, using default fallback.")
                 image_url = self.DEFAULT_IMAGE_URL
 
-            # 2. Date
+            # Date
             date_text = ""
             date_el = soup.select_one(".date, .campaign-date")
             if date_el:
                 date_text = self._clean_text(date_el.text)
-            
-            # Fallback Date: Look for text pattern
             if not date_text:
                 full_page_text = soup.get_text()
-                date_match = re.search(r'(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})\s*-\s*(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})', full_page_text)
+                date_match = re.search(
+                    r"(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})\s*-\s*(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})",
+                    full_page_text,
+                )
                 if date_match:
                     date_text = date_match.group(0)
 
-            # 3. Participation & Conditions
+            # Participation & Conditions
             participation_text = ""
             conditions = []
             full_text = ""
 
-            # Try to find content div
-            content_div = soup.select_one('.detail-text, .campaign-content, section .container')
+            content_div = soup.select_one(".detail-text, .campaign-content, section .container")
             if content_div:
-                 # Extract Participation
-                 part_label = content_div.find(string=re.compile(r"Katılım Şekli|Katılmak için", re.I))
-                 if part_label:
-                     parent = part_label.find_parent('p') or part_label.find_parent('div')
-                     participation_text = self._clean_text(parent.get_text()) if parent else ""
-                 
-                 # Conditions
-                 raw_text = content_div.get_text('\n')
-                 conditions = [self._clean_text(line) for line in raw_text.split('\n') if len(self._clean_text(line)) > 20]
-                 full_text = " ".join(conditions)
+                part_label = content_div.find(
+                    string=re.compile(r"Katılım Şekli|Katılmak için", re.I)
+                )
+                if part_label:
+                    parent = part_label.find_parent("p") or part_label.find_parent("div")
+                    participation_text = self._clean_text(parent.get_text()) if parent else ""
+
+                raw_text = content_div.get_text("\n")
+                conditions = [
+                    self._clean_text(line)
+                    for line in raw_text.split("\n")
+                    if len(self._clean_text(line)) > 20
+                ]
+                full_text = " ".join(conditions)
             else:
-                 full_text = self._clean_text(soup.get_text())[:1000]
+                full_text = self._clean_text(soup.get_text())[:1000]
 
             if participation_text:
                 full_text += f"\nKATILIM ŞEKLİ: {participation_text}"
-            
+
             conditions = [c for c in conditions if not c.startswith("Copyright")]
 
             return {
-                'title': title,
-                'image_url': image_url,
-                'date_text': date_text,
-                'full_text': full_text,
-                'conditions': conditions,
-                'source_url': url,
-                'participation': participation_text 
+                "title": title,
+                "image_url": image_url,
+                "date_text": date_text,
+                "full_text": full_text,
+                "conditions": conditions,
+                "source_url": url,
+                "participation": participation_text,
             }
-            
+
         except Exception as e:
             print(f"   ⚠️ Error extracting {url}: {e}")
             return None
-        finally:
-            # Always close the new tab and switch back
-            if new_window:
-                try:
-                    self.driver.close()
-                except:
-                    pass
-            try:
-                self.driver.switch_to.window(original_window)
-            except:
-                pass
-    
+
     def _parse_date(self, date_text: str, is_end: bool = False) -> Optional[str]:
-        """Parse Turkish date format to YYYY-MM-DD"""
-        if not date_text: return None
-        text = date_text.replace('İ', 'i').lower()
-        months = {'ocak': '01', 'şubat': '02', 'mart': '03', 'nisan': '04', 'mayıs': '05', 'haziran': '06', 
-                  'temmuz': '07', 'ağustos': '08', 'eylül': '09', 'ekim': '10', 'kasım': '11', 'aralık': '12'}
+        if not date_text:
+            return None
+        text = date_text.replace("İ", "i").lower()
+        months = {
+            "ocak": "01", "şubat": "02", "mart": "03", "nisan": "04",
+            "mayıs": "05", "haziran": "06", "temmuz": "07", "ağustos": "08",
+            "eylül": "09", "ekim": "10", "kasım": "11", "aralık": "12",
+        }
         try:
-            pattern = r'(\d{1,2})\s*([a-zğüşıöç]+)?\s*-\s*(\d{1,2})\s*([a-zğüşıöç]+)\s*(\d{4})'
+            pattern = r"(\d{1,2})\s*([a-zğüşıöç]+)?\s*-\s*(\d{1,2})\s*([a-zğüşıöç]+)\s*(\d{4})"
             match = re.search(pattern, text)
             if match:
                 day1, month1, day2, month2, year = match.groups()
-                if not month1: month1 = month2
-                if is_end: return f"{year}-{months.get(month2, '12')}-{str(day2).zfill(2)}"
-                else: return f"{year}-{months.get(month1, '01')}-{str(day1).zfill(2)}"
-        except: pass
+                if not month1:
+                    month1 = month2
+                if is_end:
+                    return f"{year}-{months.get(month2, '12')}-{str(day2).zfill(2)}"
+                return f"{year}-{months.get(month1, '01')}-{str(day1).zfill(2)}"
+        except Exception:
+            pass
         return None
-    
+
     def _clean_text(self, text: str) -> str:
-        if not text: return ""
-        text = text.replace('\n', ' ').replace('\r', '')
-        text = re.sub(r'\s+', ' ', text).strip()
+        if not text:
+            return ""
+        text = text.replace("\n", " ").replace("\r", "")
+        text = re.sub(r"\s+", " ", text).strip()
         return text
-    
+
     def _process_campaign(self, url: str):
-        # ---------------------------------------------------------
-        # ⚡ OPTIMIZATION: Check if URL already exists in DB
-        # ---------------------------------------------------------
         try:
             with get_db_session() as db:
                 exists = db.query(Campaign).filter(
                     Campaign.tracking_url == url,
-                    Campaign.card_id == self.card_id
+                    Campaign.card_id == self.card_id,
                 ).first()
                 if exists:
                     print(f"   ⏭️  Skipped (Already exists): {url}")
                     return "skipped"
         except Exception as e:
             print(f"   ⚠️ URL check failed: {e}")
-            pass
-        # ---------------------------------------------------------
 
         print(f"🔍 Processing: {url}")
-        # Note: _extract_campaign_data now handles tab management internally
         data = self._extract_campaign_data(url)
-        
         if not data:
             print("   ⏭️  Skipped (No data or closed window)")
             return "skipped"
-        
+
         ai_result = parse_api_campaign(
-            title=data['title'],
-            short_description=data['full_text'][:500],
-            content_html=data['full_text'],
-            bank_name=self.BANK_NAME
+            title=data["title"],
+            short_description=data["full_text"][:500],
+            content_html=data["full_text"],
+            bank_name=self.BANK_NAME,
         )
-        return self._save_campaign(data['title'], data['image_url'], data['date_text'], data['source_url'], ai_result)
-    
-    def _save_campaign(self, title: str, image_url: Optional[str], date_text: str, source_url: str, ai_data: Dict[str, Any]):
+        return self._save_campaign(
+            data["title"], data["image_url"], data["date_text"], data["source_url"], ai_result
+        )
+
+    def _save_campaign(
+        self,
+        title: str,
+        image_url: Optional[str],
+        date_text: str,
+        source_url: str,
+        ai_data: Dict[str, Any],
+    ):
         print(f"   💾 Saving campaign: {title[:30]}...")
         try:
             with get_db_session() as db:
-                from src.scrapers.isbankasi_maximiles import Campaign
-                from src.models import Sector, CampaignBrand, Brand
+                from src.models import Brand, CampaignBrand
                 from src.utils.slug_generator import get_unique_slug
-                
-                base_slug = generate_slug(ai_data.get('short_title') or title)
-                slug = get_unique_slug(ai_data.get('short_title') or title, db, Campaign)
-                
-                sector_name = ai_data.get('sector', 'Diğer')
+
+                slug = get_unique_slug(ai_data.get("short_title") or title, db, Campaign)
+
+                sector_name = ai_data.get("sector", "Diğer")
                 sector = db.query(Sector).filter(Sector.name == sector_name).first()
-                if not sector: sector = db.query(Sector).filter(Sector.slug == 'diger').first()
-                
+                if not sector:
+                    sector = db.query(Sector).filter(Sector.slug == "diger").first()
+
                 start_date = None
-                if ai_data.get('start_date'):
-                    try: start_date = datetime.strptime(ai_data['start_date'], '%Y-%m-%d')
-                    except: pass
+                if ai_data.get("start_date"):
+                    try:
+                        start_date = datetime.strptime(ai_data["start_date"], "%Y-%m-%d")
+                    except Exception:
+                        pass
                 if not start_date:
-                    sd_str = self._parse_date(date_text, is_end=False)
-                    if sd_str:
-                        try: start_date = datetime.strptime(sd_str, '%Y-%m-%d')
-                        except: pass
-                if not start_date: start_date = datetime.now()
-                
+                    sd = self._parse_date(date_text, is_end=False)
+                    if sd:
+                        try:
+                            start_date = datetime.strptime(sd, "%Y-%m-%d")
+                        except Exception:
+                            pass
+                if not start_date:
+                    start_date = datetime.now()
+
                 end_date = None
-                if ai_data.get('end_date'):
-                    try: end_date = datetime.strptime(ai_data['end_date'], '%Y-%m-%d')
-                    except: pass
+                if ai_data.get("end_date"):
+                    try:
+                        end_date = datetime.strptime(ai_data["end_date"], "%Y-%m-%d")
+                    except Exception:
+                        pass
                 if not end_date:
-                    ed_str = self._parse_date(date_text, is_end=True)
-                    if ed_str:
-                        try: end_date = datetime.strptime(ed_str, '%Y-%m-%d')
-                        except: pass
-                
+                    ed = self._parse_date(date_text, is_end=True)
+                    if ed:
+                        try:
+                            end_date = datetime.strptime(ed, "%Y-%m-%d")
+                        except Exception:
+                            pass
+
                 conditions_lines = []
-                participation = ai_data.get('participation')
+                participation = ai_data.get("participation")
                 if participation and participation != "Detayları İnceleyin":
                     conditions_lines.append(f"KATILIM: {participation}")
-                if ai_data.get('conditions'):
-                    conditions_lines.extend(ai_data.get('conditions'))
+                if ai_data.get("conditions"):
+                    conditions_lines.extend(ai_data.get("conditions"))
                 conditions_text = "\n".join(conditions_lines)
-                
-                eligible_cards_list = ai_data.get('cards', [])
+
+                eligible_cards_list = ai_data.get("cards", [])
                 eligible_cards_str = ", ".join(eligible_cards_list) if eligible_cards_list else None
-                
+
                 campaign = Campaign(
                     card_id=self.card_id,
                     sector_id=sector.id if sector else None,
                     slug=slug,
-                    title=ai_data.get('short_title') or title,
-                    description=ai_data.get('description') or title[:200],
-                    reward_text=ai_data.get('reward_text'),
-                    reward_value=ai_data.get('reward_value'),
-                    reward_type=ai_data.get('reward_type'),
+                    title=ai_data.get("short_title") or title,
+                    description=ai_data.get("description") or title[:200],
+                    reward_text=ai_data.get("reward_text"),
+                    reward_value=ai_data.get("reward_value"),
+                    reward_type=ai_data.get("reward_type"),
                     conditions=conditions_text,
                     eligible_cards=eligible_cards_str,
                     image_url=image_url,
@@ -493,29 +409,38 @@ class IsbankMaximumGencScraper:
                     is_active=True,
                     created_at=datetime.utcnow(),
                     updated_at=datetime.utcnow(),
-                    tracking_url=source_url
+                    tracking_url=source_url,
                 )
                 db.add(campaign)
                 print("   📝 Added to session...")
-                
-                 # Save Brands
-                if ai_data.get('brands'):
-                    for brand_name in ai_data['brands']:
+
+                if ai_data.get("brands"):
+                    for brand_name in ai_data["brands"]:
                         clean_name = brand_name.strip()
-                        if not clean_name: continue
+                        if not clean_name:
+                            continue
                         brand_slug = generate_slug(clean_name)
                         brand = db.query(Brand).filter(Brand.slug == brand_slug).first()
-                        if not brand: brand = db.query(Brand).filter(Brand.name == clean_name).first()
                         if not brand:
-                            brand = Brand(name=clean_name, slug=brand_slug, is_active=True, aliases=[clean_name])
+                            brand = db.query(Brand).filter(Brand.name == clean_name).first()
+                        if not brand:
+                            brand = Brand(
+                                name=clean_name,
+                                slug=brand_slug,
+                                is_active=True,
+                                aliases=[clean_name],
+                            )
                             db.add(brand)
                             db.flush()
                             print(f"      ✨ Created new brand: {clean_name}")
                         else:
-                             print(f"      ✓ Brand exists: {clean_name}")
-                        
+                            print(f"      ✓ Brand exists: {clean_name}")
+
                         db.flush()
-                        existing_link = db.query(CampaignBrand).filter(CampaignBrand.campaign_id == campaign.id, CampaignBrand.brand_id == brand.id).first()
+                        existing_link = db.query(CampaignBrand).filter(
+                            CampaignBrand.campaign_id == campaign.id,
+                            CampaignBrand.brand_id == brand.id,
+                        ).first()
                         if not existing_link:
                             link = CampaignBrand(campaign_id=campaign.id, brand_id=brand.id)
                             db.add(link)
@@ -531,16 +456,17 @@ class IsbankMaximumGencScraper:
             return "error"
 
     def run(self, limit: Optional[int] = None):
+        """Main scraper entry point."""
         try:
-            print(f"🚀 Starting İşbankası Maximum Genç Scraper...")
-            self.driver = self._get_driver()
-            self.driver.set_page_load_timeout(60)
+            print("🚀 Starting İşbankası Maximum Genç Scraper (Playwright mode)...")
+            self._start_browser()
+
             urls = self._fetch_campaign_urls(limit=limit)
-            
+
             success_count = 0
             skipped_count = 0
             failed_count = 0
-            
+
             for i, url in enumerate(urls, 1):
                 print(f"\n[{i}/{len(urls)}]")
                 try:
@@ -554,20 +480,20 @@ class IsbankMaximumGencScraper:
                 except Exception as e:
                     print(f"❌ Error processing {url}: {e}")
                     failed_count += 1
-                    
+
                 time.sleep(1.5)
-            print(f"\n🏁 Scraping finished.")
-            print(f"✅ Özet: {len(urls)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+
+            print("\n🏁 Scraping finished.")
+            print(
+                f"✅ Özet: {len(urls)} bulundu, {success_count} eklendi, "
+                f"{skipped_count + failed_count} atlandı/hata aldı."
+            )
         except Exception as e:
             print(f"❌ Scraper error: {e}")
             raise
         finally:
-            if self.driver:
-                try: self.driver.quit()
-                except: pass
-            if hasattr(self, 'display') and self.display:
-                try: self.display.stop()
-                except: pass
+            self._stop_browser()
+
 
 if __name__ == "__main__":
     scraper = IsbankMaximumGencScraper()
