@@ -417,6 +417,16 @@ class IsbankMaximumScraper:
         if not date_text:
             return None
         text = date_text.replace("İ", "i").lower()
+        
+        # Check dd.mm.yyyy format first: 1.1.2026 - 31.12.2026
+        pattern_dot = r"(\d{1,2})\.(\d{1,2})\.(\d{4})\s*-\s*(\d{1,2})\.(\d{1,2})\.(\d{4})"
+        match_dot = re.search(pattern_dot, text)
+        if match_dot:
+            d1, m1, y1, d2, m2, y2 = match_dot.groups()
+            if is_end:
+                return f"{y2}-{m2.zfill(2)}-{d2.zfill(2)}"
+            return f"{y1}-{m1.zfill(2)}-{d1.zfill(2)}"
+            
         months = {
             "ocak": "01", "şubat": "02", "mart": "03", "nisan": "04",
             "mayıs": "05", "haziran": "06", "temmuz": "07", "ağustos": "08",
