@@ -1,17 +1,15 @@
 name: Kartavantaj Auto Scrapers
 
 on:
-  workflow_dispatch:  # Manual trigger
-  schedule:
-    - cron: '0 3 * * *'  # Run daily at 03:00 UTC
-
-jobs:
-  scrape:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false  # CRITICAL: Ensures that if one scraper fails, the rest continue to run
-      matrix:
-        scraper: 
+  workflow_dispatch:
+    inputs:
+      scraper:
+        description: 'Çalıştırılacak scraper (boş bırakırsan tümü çalışır)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
           - akbank_axess
           - akbank_business
           - akbank_free
@@ -35,33 +33,49 @@ jobs:
           - yapikredi_play
           - yapikredi_world
           - ziraat
-          
+
+  schedule:
+    - cron: '0 0 * * *'   # TSİ 03:00 (UTC 00:00)
+    - cron: '0 12 * * *'  # TSİ 15:00 (UTC 12:00)
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # CRITICAL: Ensures that if one scraper fails, the rest continue to run
+      matrix:
+        scraper: ${{ 
+          (github.event_name == 'workflow_dispatch' && github.event.inputs.scraper != 'all') 
+          && fromJson(format('["{0}"]', github.event.inputs.scraper))
+          || fromJson('["akbank_axess","akbank_business","akbank_free","akbank_wings","chippin","denizbank","enpara","garanti_milesandsmiles","garanti_shopandfly","isbankasi_genc","isbankasi_maximiles","isbankasi_maximum","paraf","paraf_genc","qnb","teb","turkiyefinans","vakifbank","yapikredi_adios","yapikredi_crystal","yapikredi_play","yapikredi_world","ziraat"]')
+        }}
+
     name: Run ${{ matrix.scraper }} Scraper
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
         cache: 'pip'
-        
+
     - name: Install System Dependencies (Chrome & Xvfb)
       run: |
         sudo apt-get update
         sudo apt-get install -y google-chrome-stable xvfb
-        
+
     - name: Install Python Dependencies
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
         pip install selenium-stealth pyvirtualdisplay webdriver-manager
-        
+
     - name: Install Playwright Browsers
       run: |
         playwright install chromium --with-deps
-        
+
     - name: Run Scraper
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
