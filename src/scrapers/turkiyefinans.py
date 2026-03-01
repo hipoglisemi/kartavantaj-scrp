@@ -14,12 +14,8 @@ from sqlalchemy import create_engine, text
 from services.ai_parser import AIParser
 from services.brand_normalizer import cleanup_brands
 
-# Selenium Imports
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
+# Playwright
+from playwright.sync_api import sync_playwright
 
 load_dotenv()
 
@@ -37,18 +33,19 @@ BANK_LOGO = "https://www.turkiyefinans.com.tr/PublishingImages/Logo/tfkb-logo.pn
 # Card definitions
 CARD_DEFINITIONS = {
     "happy-card": {
-        "name": "Happy Card", 
+        "name": "Happy Card",
         "slug": "happy-card",
         "start_url": "https://www.happycard.com.tr/kampanyalar/Sayfalar/default.aspx",
         "domain": "https://www.happycard.com.tr"
     },
     "ala-card": {
-        "name": "Âlâ Kart", 
+        "name": "Âlâ Kart",
         "slug": "ala-kart",
         "start_url": "https://www.turkiyefinansala.com/tr-tr/kampanyalar/Sayfalar/default.aspx",
         "domain": "https://www.turkiyefinansala.com"
     }
 }
+
 
 def slugify(text: str) -> str:
     text = text.lower()
@@ -57,6 +54,7 @@ def slugify(text: str) -> str:
     text = re.sub(r'[^a-z0-9\s-]', '', text)
     text = re.sub(r'[\s-]+', '-', text).strip('-')
     return text
+
 
 def html_to_text(html_content: str) -> str:
     if not html_content:
@@ -67,27 +65,26 @@ def html_to_text(html_content: str) -> str:
     lines = [l.strip() for l in soup.get_text(separator="\n").splitlines() if l.strip()]
     return "\n".join(lines)
 
+
 def filter_conditions(conditions: List[str]) -> List[str]:
     """Removes legal disclaimers and standard bank texts from conditions."""
     blacklist = [
-        "değişiklik yapma hakkı", 
-        "saklı tutar", 
-        "yazım hataları", 
-        "sorumlu tutulamaz", 
+        "değişiklik yapma hakkı",
+        "saklı tutar",
+        "yazım hataları",
+        "sorumlu tutulamaz",
         "sorumluluk kabul edilmez",
         "banka kampanya şartlarını",
         "durdurma hakkına sahiptir",
         "sorumluluk türkiye finans"
     ]
-    
     clean = []
     for c in conditions:
-        c_lower = c.lower()
-        # Check if the line contains any blacklisted phrase
-        if any(b in c_lower for b in blacklist):
+        if any(b in c.lower() for b in blacklist):
             continue
         clean.append(c)
     return clean
+
 
 class TurkiyeFinansScraper:
     def __init__(self):
@@ -95,34 +92,42 @@ class TurkiyeFinansScraper:
         self.ai_parser = AIParser() if GEMINI_API_KEY else None
         self.bank_id = None
         self._card_cache = {}
-        self.driver = None
+        self.pw = None
+        self.browser = None
+        self.page = None
 
-    def setup_driver(self):
-        """Initializes the Selenium WebDriver with robust options."""
-        print("   🌐 Initializing Selenium WebDriver...")
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        chrome_options.add_argument("--allow-running-insecure-content")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--dns-prefetch-disable")
-        chrome_options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        
-        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        self.driver.set_page_load_timeout(60)
+    def _start_browser(self):
+        """Initializes Playwright browser."""
+        print("   🌐 Initializing Playwright browser...")
+        self.pw = sync_playwright().start()
+        self.browser = self.pw.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--window-size=1920,1080",
+            ]
+        )
+        context = self.browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        self.page = context.new_page()
+        self.page.set_default_timeout(60000)
+        print("   ✅ Playwright browser started.")
 
-    def teardown_driver(self):
-        if self.driver:
-            print("   🛑 Closing Selenium WebDriver...")
-            self.driver.quit()
-            self.driver = None
+    def _stop_browser(self):
+        try:
+            if self.browser:
+                self.browser.close()
+            if self.pw:
+                self.pw.stop()
+        except Exception:
+            pass
 
     def _get_or_create_bank(self):
-        # ... (Same as before)
         try:
             with self.engine.begin() as conn:
                 result = conn.execute(
@@ -145,7 +150,6 @@ class TurkiyeFinansScraper:
             raise
 
     def _get_or_create_card(self, card_def: dict) -> int:
-        # ... (Same as before)
         slug = card_def["slug"]
         if slug in self._card_cache:
             return self._card_cache[slug]
@@ -172,179 +176,156 @@ class TurkiyeFinansScraper:
             raise
 
     def _resolve_sector_by_name(self, sector_name: str) -> Optional[int]:
-        if not sector_name: return None
+        if not sector_name:
+            return None
         try:
             with self.engine.connect() as conn:
-                result = conn.execute(text("SELECT id FROM sectors WHERE name ILIKE :name LIMIT 1"), {"name": f"%{sector_name}%"}).fetchone()
+                result = conn.execute(
+                    text("SELECT id FROM sectors WHERE name ILIKE :name LIMIT 1"),
+                    {"name": f"%{sector_name}%"}
+                ).fetchone()
                 return result[0] if result else None
         except Exception:
             return None
 
     def _collect_links(self, card_key: str) -> List[str]:
+        """Use Playwright to navigate the campaign list and collect all campaign links."""
         card_def = CARD_DEFINITIONS[card_key]
         start_url = card_def["start_url"]
         domain = card_def["domain"]
-        
-        print(f"   🌐 [Selenium] Navigating to list page: {start_url}")
-        links = set()
-        
-        try:
-            if not self.driver:
-                self.setup_driver()
 
-            self.driver.get(start_url)
-            time.sleep(5)
-            
-            # Scroll dynamically to load all campaigns
+        print(f"   🌐 [Playwright] Navigating to list page: {start_url}")
+        links = set()
+
+        try:
+            self.page.goto(start_url, wait_until="networkidle", timeout=60000)
+            time.sleep(3)
+
+            # Scroll to load all lazy-loaded content
             print("   📜 Scrolling to load all campaigns...")
-            
-            last_height = self.driver.execute_script("return document.body.scrollHeight")
+            prev_height = 0
             scroll_attempts = 0
-            max_attempts = 15 # A reasonable limit to prevent true infinite loops
-            
+            max_attempts = 20
+
             while scroll_attempts < max_attempts:
-                # Scroll down to bottom
-                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                
-                # Wait for new elements to load
-                time.sleep(random.uniform(2.0, 3.5))
-                
-                # Calculate new scroll height and compare with last scroll height
-                new_height = self.driver.execute_script("return document.body.scrollHeight")
-                
-                if new_height == last_height:
-                    # Try one more time with a slightly different scroll to trigger lazy loading
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight - 100);")
-                    time.sleep(1)
-                    self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(2.5)
+
+                new_height = self.page.evaluate("document.body.scrollHeight")
+                if new_height == prev_height:
+                    # One more attempt with slightly less scroll
+                    self.page.evaluate("window.scrollTo(0, document.body.scrollHeight - 200)")
+                    time.sleep(1.5)
+                    self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                     time.sleep(2)
-                    
-                    new_height = self.driver.execute_script("return document.body.scrollHeight")
-                    if new_height == last_height:
+                    final_height = self.page.evaluate("document.body.scrollHeight")
+                    if final_height == new_height:
                         print(f"   ✅ Reached bottom after {scroll_attempts} scrolls.")
                         break
-                
-                last_height = new_height
+                prev_height = new_height
                 scroll_attempts += 1
                 print(f"   ⏬ Loaded more content (Scroll {scroll_attempts})...")
-            
+
             time.sleep(2)
-            
-            anchors = self.driver.find_elements(By.TAG_NAME, "a")
+
+            # Extract all campaign links
+            anchors = self.page.query_selector_all("a[href]")
             for a in anchors:
                 try:
                     href = a.get_attribute("href")
-                    if href:
-                        if "/kampanyalar/" in href and "default.aspx" not in href.lower() and "spsdisco" not in href:
-                             if domain in href or href.startswith("/"):
-                                 if href.startswith("/"):
-                                     if href.startswith(domain):
-                                        links.add(href)
-                                     else:
-                                        links.add(f"{domain}{href}")
-                                 else:
-                                     links.add(href)
-                except Exception: continue
+                    if href and "/kampanyalar/" in href and "default.aspx" not in href.lower() and "spsdisco" not in href:
+                        if domain in href:
+                            links.add(href)
+                        elif href.startswith("/"):
+                            links.add(f"{domain}{href}")
+                except Exception:
+                    continue
 
             print(f"   ✅ Found {len(links)} links.")
         except Exception as e:
             print(f"   ❌ Link collection error: {e}")
-            
+
         return sorted(list(links))
 
     def _process_campaign(self, url: str, card_key: str, card_id: int):
         card_def = CARD_DEFINITIONS[card_key]
-        
+
         try:
-            # Use Selenium for details too!
-            self.driver.get(url)
-            time.sleep(2) # Wait for dyn content
-            
-            # Get page source and parse with BS4 (easier to extract text than raw Selenium)
-            html = self.driver.page_source
+            self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(2)
+
+            html = self.page.content()
             soup = BeautifulSoup(html, "html.parser")
-            
+
             # Title Extraction
             title = ""
             GENERIC_TITLES = [
-                "kampanyalar", "hesaplar", "yatırım hizmetleri", 
-                "bankacılık hizmetleri", "âlâ kart", "âlâ hayat blog", 
+                "kampanyalar", "hesaplar", "yatırım hizmetleri",
+                "bankacılık hizmetleri", "âlâ kart", "âlâ hayat blog",
                 "kampanya detayı:", "sıkça sorulan sorular", "iletişim"
             ]
 
-            h1 = soup.find("h1")
-            if h1:
-                t = h1.get_text(strip=True)
-                if t and t.lower() not in GENERIC_TITLES: title = t
+            for tag in ["h1", "h2", "h3"]:
+                el = soup.find(tag)
+                if el:
+                    t = el.get_text(strip=True)
+                    if t and t.lower() not in GENERIC_TITLES:
+                        title = t
+                        break
 
-            if not title:
-                h2 = soup.find("h2") 
-                if h2: 
-                    t = h2.get_text(strip=True)
-                    if t and t.lower() not in GENERIC_TITLES: title = t
+            if not title and soup.title:
+                t = soup.title.string
+                if t:
+                    t = t.replace("- Happy Card", "").replace("Türkiye Finans Happy Kredi Kartları Kampanyalar", "").strip()
+                    if t and t.lower() not in GENERIC_TITLES:
+                        title = t
 
-            if not title:
-                if soup.title:
-                    t = soup.title.string.replace("- Happy Card", "").replace("Türkiye Finans Happy Kredi Kartları Kampanyalar", "").strip()
-                    if t and t.lower() not in GENERIC_TITLES: title = t
-            
-            if not title:
-                h3 = soup.find("h3")
-                if h3: 
-                    t = h3.get_text(strip=True)
-                    if t.lower() not in GENERIC_TITLES: title = t
-            
             if not title or title.lower() in GENERIC_TITLES:
-                 print(f"      ⚠️ Valid title not found, skipping {url}")
-                 return "skipped"
+                print(f"      ⚠️ Valid title not found, skipping {url}")
+                return "skipped"
 
             # Image
             image_url = None
-            img_tag = soup.select_one(".campaign-image img") or \
-                      soup.select_one(".ms-rteImage-4") or \
-                      soup.select_one("img[src*='upload']") or \
-                      soup.select_one("img[src*='banner']") or \
-                      soup.select_one("img[src*='kampanya']")
+            img_tag = (
+                soup.select_one(".campaign-image img") or
+                soup.select_one(".ms-rteImage-4") or
+                soup.select_one("img[src*='upload']") or
+                soup.select_one("img[src*='banner']") or
+                soup.select_one("img[src*='kampanya']")
+            )
             if img_tag:
                 src = img_tag.get("src")
                 if src:
-                    if src.startswith("http"): image_url = src
-                    elif src.startswith("/"): image_url = f"{card_def['domain']}{src}"
+                    if src.startswith("http"):
+                        image_url = src
+                    elif src.startswith("/"):
+                        image_url = f"{card_def['domain']}{src}"
 
-            # Content - Best Candidate Strategy
+            # Content
             candidates = []
             candidates.extend(soup.select(".ms-rtestate-field"))
             candidates.extend(soup.select(".campaign-description"))
-            candidates.extend(soup.select(".campaign-text")) # Added based on debug
+            candidates.extend(soup.select(".campaign-text"))
             candidates.extend(soup.select("#content"))
             candidates.extend(soup.select(".content"))
-            
+
             content_text = ""
             max_len = 0
-
-            # Find the candidate with the most text
             for cand in candidates:
                 txt = html_to_text(str(cand))
-                # Basic cleanup check
                 if len(txt) > max_len:
                     max_len = len(txt)
                     content_text = txt
-            
-            # Fallback to body only if candidates failed completely or returned very short text
+
             if max_len < 100:
                 print("      ⚠️ Candidate text too short, trying Body fallback...")
-                # Body fallback with aggressive cleanup
                 body_copy = soup.body
                 if body_copy:
-                    # Remove known clutter
-                    for tag in body_copy.select("nav, footer, header, .menu, .sidebar, script, style, noscript, .ms-webpart-zone, .search-box"):
+                    for tag in body_copy.select("nav, footer, header, .menu, .sidebar, script, style, noscript"):
                         tag.decompose()
                     body_text = html_to_text(str(body_copy))
                     if len(body_text) > max_len:
                         content_text = body_text
-
-            if len(content_text) < 50:
-                 print(f"      ⚠️ Content too short ({len(content_text)} chars), might be empty.")
 
             # AI Parsing
             ai_data = {}
@@ -357,30 +338,37 @@ class TurkiyeFinansScraper:
                         card_name=card_def["name"],
                     )
                 except Exception as e:
-                    print(f"      ⚠️  AI Error: {e}")
+                    print(f"      ⚠️ AI Error: {e}")
 
-            # Slug
-            link_slug = slugify(url.rstrip("/").split("/")[-1].replace(".aspx",""))
-            if not link_slug or link_slug == "default": link_slug = slugify(title)
+            link_slug = slugify(url.rstrip("/").split("/")[-1].replace(".aspx", ""))
+            if not link_slug or link_slug == "default":
+                link_slug = slugify(title)
             slug = f"{link_slug}-{int(time.time())}"
 
             conditions_lines = []
             participation = ai_data.get("participation")
-            if participation: conditions_lines.append(f"KATILIM: {participation}")
-            
+            if participation:
+                conditions_lines.append(f"KATILIM: {participation}")
+
             eligible_cards = ai_data.get("cards")
             eligible_str = ", ".join(eligible_cards) if eligible_cards else None
-            if eligible_str and len(eligible_str) > 255: eligible_str = eligible_str[:255]
-            
+            if eligible_str and len(eligible_str) > 255:
+                eligible_str = eligible_str[:255]
+
             conditions_lines.extend(ai_data.get("conditions", []))
-            
-            # Filter unwanted legal text
             conditions_lines = filter_conditions(conditions_lines)
-            
-            # Database Ops
+
+            campaign_id = None
             with self.engine.begin() as conn:
-                existing = conn.execute(text("SELECT id FROM campaigns WHERE tracking_url = :url"), {"url": url}).fetchone()
-                
+                existing = conn.execute(
+                    text("SELECT id FROM campaigns WHERE tracking_url = :url"),
+                    {"url": url}
+                ).fetchone()
+
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {title[:40]}")
+                    return "skipped"
+
                 campaign_data = {
                     "title": ai_data.get("title") or title,
                     "description": ai_data.get("description") or "",
@@ -395,46 +383,54 @@ class TurkiyeFinansScraper:
                     "reward_text": ai_data.get("reward_text"),
                     "reward_value": ai_data.get("reward_value"),
                     "reward_type": ai_data.get("reward_type"),
+                    "slug": slug,
                 }
 
-                if existing:
-                    print(f"   ⏭️ Skipped (Already exists, preserving manual edits): {title[:40]}")
-                    return "skipped"
-                else:
-                    print(f"   ✨ Creating: {title[:40]}")
-                    campaign_data["slug"] = slug
-                    result = conn.execute(text("""
-                        INSERT INTO campaigns (
-                            title, description, slug, image_url, tracking_url, is_active,
-                            sector_id, card_id, start_date, end_date, conditions,
-                            eligible_cards, reward_text, reward_value, reward_type,
-                            created_at, updated_at
-                        )
-                        VALUES (
-                            :title, :description, :slug, :image_url, :tracking_url, true,
-                            :sector_id, :card_id, :start_date, :end_date, :conditions,
-                            :eligible_cards, :reward_text, :reward_value, :reward_type,
-                            NOW(), NOW()
-                        )
-                        RETURNING id
-                    """), campaign_data)
-                    campaign_id = result.fetchone()[0]
+                print(f"   ✨ Creating: {campaign_data['title'][:40]}")
+                result = conn.execute(text("""
+                    INSERT INTO campaigns (
+                        title, description, slug, image_url, tracking_url, is_active,
+                        sector_id, card_id, start_date, end_date, conditions,
+                        eligible_cards, reward_text, reward_value, reward_type,
+                        created_at, updated_at
+                    )
+                    VALUES (
+                        :title, :description, :slug, :image_url, :tracking_url, true,
+                        :sector_id, :card_id, :start_date, :end_date, :conditions,
+                        :eligible_cards, :reward_text, :reward_value, :reward_type,
+                        NOW(), NOW()
+                    )
+                    RETURNING id
+                """), campaign_data)
+                campaign_id = result.fetchone()[0]
 
-                # Brands (unchanged logic)
+                # Brands
                 if ai_data.get("brands") and campaign_id:
                     clean_brands = cleanup_brands(ai_data["brands"])
                     for brand_name in clean_brands:
-                        brand_res = conn.execute(text("SELECT id FROM brands WHERE name=:name"), {"name": brand_name}).fetchone()
+                        brand_res = conn.execute(
+                            text("SELECT id FROM brands WHERE name=:name"),
+                            {"name": brand_name}
+                        ).fetchone()
                         if brand_res:
                             bid = brand_res[0]
                         else:
                             bslug = f"{slugify(brand_name)}-{int(time.time())}"
-                            brand_res = conn.execute(text("INSERT INTO brands (name, slug, is_active, created_at) VALUES (:name, :slug, true, NOW()) RETURNING id"), {"name": brand_name, "slug": bslug}).fetchone()
+                            brand_res = conn.execute(
+                                text("INSERT INTO brands (name, slug, is_active, created_at) VALUES (:name, :slug, true, NOW()) RETURNING id"),
+                                {"name": brand_name, "slug": bslug}
+                            ).fetchone()
                             bid = brand_res[0]
-                        
-                        link_check = conn.execute(text("SELECT 1 FROM campaign_brands WHERE campaign_id=:cid AND brand_id=CAST(:bid AS uuid)"), {"cid": campaign_id, "bid": bid}).fetchone()
+
+                        link_check = conn.execute(
+                            text("SELECT 1 FROM campaign_brands WHERE campaign_id=:cid AND brand_id=CAST(:bid AS uuid)"),
+                            {"cid": campaign_id, "bid": bid}
+                        ).fetchone()
                         if not link_check:
-                            conn.execute(text("INSERT INTO campaign_brands (campaign_id, brand_id) VALUES (:cid, CAST(:bid AS uuid))"), {"cid": campaign_id, "bid": bid})
+                            conn.execute(
+                                text("INSERT INTO campaign_brands (campaign_id, brand_id) VALUES (:cid, CAST(:bid AS uuid))"),
+                                {"cid": campaign_id, "bid": bid}
+                            )
 
             return "saved"
         except Exception as e:
@@ -442,31 +438,31 @@ class TurkiyeFinansScraper:
             return "error"
 
     def run(self, limit: int = 1000, target: str = "all"):
-        print("🚀 Starting Türkiye Finans Scraper (Full Selenium)...")
+        print("🚀 Starting Türkiye Finans Scraper (Playwright mode)...")
         self._get_or_create_bank()
-        
-        cards_to_process = []
-        if target == "all": cards_to_process = ["happy-card", "ala-card"]
-        else: cards_to_process = [target]
+
+        cards_to_process = ["happy-card", "ala-card"] if target == "all" else [target]
 
         try:
-            self.setup_driver()
-            
+            self._start_browser()
+
             for card_key in cards_to_process:
                 card_def = CARD_DEFINITIONS[card_key]
                 print(f"\n👉 Processing {card_def['name']}...")
                 card_id = self._get_or_create_card(card_def)
-                
+
                 links = self._collect_links(card_key)
-                if not links: continue
-                    
+                if not links:
+                    print(f"   ⚠️ No links found for {card_def['name']}")
+                    continue
+
                 links_to_process = links[:limit]
-                print(f"   🎯 Detailed processing for {len(links_to_process)} campaigns...")
-                
+                print(f"   🎯 Processing {len(links_to_process)} campaigns...")
+
                 success_count = 0
                 skipped_count = 0
                 failed_count = 0
-                
+
                 for idx, url in enumerate(links_to_process, 1):
                     print(f"[{idx}/{len(links_to_process)}] {url}")
                     try:
@@ -480,12 +476,15 @@ class TurkiyeFinansScraper:
                     except Exception as e:
                         print(f"   ❌ Error: {e}")
                         failed_count += 1
-                        
-                print(f"✅ Özet: {len(links_to_process)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+
+                    time.sleep(1.5)
+
+                print(f"✅ {card_def['name']} Özet: {len(links_to_process)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata.")
 
         finally:
-            self.teardown_driver()
+            self._stop_browser()
             print("\n🏁 Türkiye Finans Scraper Finished.")
+
 
 if __name__ == "__main__":
     import argparse

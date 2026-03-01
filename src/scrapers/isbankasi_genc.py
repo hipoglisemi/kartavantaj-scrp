@@ -4,64 +4,165 @@ Powered by Playwright (GitHub Actions compatible, Cloudflare-resistant)
 """
 
 import os
+import sys
 import time
 import re
+import uuid
+import traceback
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
-from src.database import get_db_session
-from src.models import Campaign, Card, Sector, Bank
-from src.services.ai_parser import parse_api_campaign
-from src.utils.slug_generator import generate_slug
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(current_dir))
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(project_root, '.env'))
+except Exception:
+    pass
+try:
+    with open(os.path.join(project_root, '.env'), 'r') as f:
+        for line in f:
+            if line.strip() and not line.startswith('#') and '=' in line:
+                k, v = line.strip().split('=', 1)
+                if k not in os.environ:
+                    os.environ[k] = v.strip('"\'')
+except Exception:
+    pass
+
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Date, Numeric, ForeignKey
+from sqlalchemy.orm import sessionmaker, relationship, declarative_base
+from sqlalchemy.dialects.postgresql import UUID
+
+try:
+    from src.services.ai_parser import AIParser
+except ImportError:
+    from services.ai_parser import AIParser
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+Base = declarative_base()
+
+class Bank(Base):
+    __tablename__ = 'banks'
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    slug = Column(String)
+    cards = relationship("Card", back_populates="bank")
+
+class Card(Base):
+    __tablename__ = 'cards'
+    id = Column(Integer, primary_key=True)
+    bank_id = Column(Integer, ForeignKey('banks.id'))
+    name = Column(String)
+    slug = Column(String)
+    is_active = Column(Boolean, default=True)
+    bank = relationship("Bank", back_populates="cards")
+    campaigns = relationship("Campaign", back_populates="card")
+
+class Sector(Base):
+    __tablename__ = 'sectors'
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    slug = Column(String)
+    campaigns = relationship("Campaign", back_populates="sector")
+
+class Brand(Base):
+    __tablename__ = 'brands'
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String)
+    slug = Column(String)
+    campaigns = relationship("CampaignBrand", back_populates="brand")
+
+class CampaignBrand(Base):
+    __tablename__ = 'campaign_brands'
+    campaign_id = Column(Integer, ForeignKey('campaigns.id'), primary_key=True)
+    brand_id = Column(UUID(as_uuid=True), ForeignKey('brands.id'), primary_key=True)
+    brand = relationship("Brand", back_populates="campaigns")
+    campaign = relationship("Campaign", back_populates="brands")
+
+class Campaign(Base):
+    __tablename__ = 'campaigns'
+    id = Column(Integer, primary_key=True)
+    card_id = Column(Integer, ForeignKey('cards.id'))
+    sector_id = Column(Integer, ForeignKey('sectors.id'))
+    slug = Column(String)
+    title = Column(String)
+    description = Column(String)
+    reward_text = Column(String)
+    reward_value = Column(Numeric)
+    reward_type = Column(String)
+    conditions = Column(String)
+    eligible_cards = Column(String)
+    image_url = Column(String)
+    start_date = Column(Date)
+    end_date = Column(Date)
+    is_active = Column(Boolean, default=True)
+    tracking_url = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+    ai_marketing_text = Column(String)
+    card = relationship("Card", back_populates="campaigns")
+    sector = relationship("Sector", back_populates="campaigns")
+    brands = relationship("CampaignBrand", back_populates="campaign")
+
+
+SECTOR_MAP = {
+    "Market & Gıda": "Market", "Giyim & Aksesuar": "Giyim",
+    "Restoran & Kafe": "Restoran & Kafe", "Seyahat": "Seyahat",
+    "Turizm & Konaklama": "Seyahat", "Elektronik": "Elektronik",
+    "Mobilya & Dekorasyon": "Mobilya & Dekorasyon",
+    "Kozmetik & Sağlık": "Kozmetik & Sağlık", "E-Ticaret": "E-Ticaret",
+    "Otomotiv": "Otomotiv", "Sigorta": "Sigorta", "Eğitim": "Eğitim",
+    "Diğer": "Diğer",
+}
 
 
 class IsbankMaximumGencScraper:
-    """İşbankası Maximum Genç card campaign scraper - Playwright based"""
+    """İşbankası Maximum Genç scraper - Playwright based"""
 
     BASE_URL = "https://www.maximumgenc.com.tr"
     CAMPAIGNS_URL = "https://www.maximumgenc.com.tr/kampanyalar"
     BANK_NAME = "İşbankası"
-    CARD_NAME = "Maximum Genç"
+    CARD_SLUG = "maximum-genc"
     DEFAULT_IMAGE_URL = "https://www.maximumgenc.com.tr/_assets/images/logo.png"
 
     def __init__(self):
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL is not set")
+        self.engine = create_engine(DATABASE_URL)
+        Session = sessionmaker(bind=self.engine)
+        self.db = Session()
+        self.parser = AIParser()
         self.page = None
         self.browser = None
         self.playwright = None
-        self.card_id = None
         self._init_card()
 
     def _init_card(self):
-        """Get Maximum Genç card ID from database"""
-        with get_db_session() as db:
-            card = db.query(Card).join(Bank).filter(
-                Bank.slug == "isbankasi",
-                Card.slug == "maximum-genc"
-            ).first()
-
-            if not card:
-                raise ValueError(
-                    f"Card '{self.CARD_NAME}' from '{self.BANK_NAME}' not found in database. Run seed_sectors.py first."
-                )
-
-            self.card_id = card.id
-            print(f"✅ Found card: {self.BANK_NAME} {self.CARD_NAME} (ID: {self.card_id})")
+        bank = self.db.query(Bank).filter(
+            (Bank.slug == 'isbankasi') | (Bank.name.ilike('%İş Bank%'))
+        ).first()
+        if not bank:
+            raise ValueError("İşbankası not found in DB")
+        card = self.db.query(Card).filter(
+            Card.slug == self.CARD_SLUG, Card.bank_id == bank.id
+        ).first()
+        if not card:
+            raise ValueError(f"Card '{self.CARD_SLUG}' not found in DB")
+        self.card_id = card.id
+        print(f"✅ Card: {self.BANK_NAME} {card.name} (ID: {self.card_id})")
 
     def _start_browser(self):
-        """Launch Playwright browser"""
         from playwright.sync_api import sync_playwright
         self.playwright = sync_playwright().start()
         self.browser = self.playwright.chromium.launch(
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--window-size=1920,1080",
-            ]
+            args=["--no-sandbox", "--disable-setuid-sandbox",
+                  "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080"]
         )
         context = self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
@@ -71,7 +172,6 @@ class IsbankMaximumGencScraper:
         print("✅ Playwright browser started.")
 
     def _stop_browser(self):
-        """Cleanup Playwright"""
         try:
             if self.browser:
                 self.browser.close()
@@ -81,192 +181,122 @@ class IsbankMaximumGencScraper:
             pass
 
     def _fetch_campaign_urls(self, limit: Optional[int] = None) -> List[str]:
-        """Fetch all campaign URLs from the listing page."""
         print(f"📥 Fetching campaign list from {self.CAMPAIGNS_URL}...")
-
         self.page.goto(self.CAMPAIGNS_URL, wait_until="networkidle", timeout=60000)
         time.sleep(5)
 
         scroll_count = 0
-        max_scrolls = 100
-
-        while scroll_count < max_scrolls:
-            if limit and limit > 0:
-                try:
-                    soup = BeautifulSoup(self.page.content(), "html.parser")
-                    count = len([
-                        a for a in soup.find_all("a", href=True)
-                        if "/kampanyalar/" in a["href"]
-                        and "gecmis" not in a["href"]
-                    ])
-                    if count >= limit:
-                        print(f"   ✅ Reached limit ({count} >= {limit}), stopping.")
-                        break
-                except Exception:
-                    pass
-
-            try:
-                self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(1)
-
-                # Try load more button
-                btn = self.page.query_selector(".show-more-opportunity")
-                if btn and btn.is_visible():
-                    btn.scroll_into_view_if_needed()
-                    time.sleep(1)
-                    try:
-                        btn.click()
-                    except Exception:
-                        self.page.evaluate(
-                            "arguments => arguments[0].click()",
-                            [btn]
-                        )
-                    time.sleep(3)
-                    scroll_count += 1
-                    print(f"   ⏬ Loaded more campaigns (Scroll {scroll_count})...")
-                else:
-                    print("   ℹ️ No more 'Load More' button (End of list).")
+        while scroll_count < 100:
+            if limit:
+                soup = BeautifulSoup(self.page.content(), "html.parser")
+                count = len([
+                    a for a in soup.find_all("a", href=True)
+                    if "/kampanyalar/" in a["href"] and "gecmis" not in a["href"]
+                ])
+                if count >= limit:
                     break
-            except Exception as e:
-                print(f"   ℹ️ Load more button not found (End of list?): {e}")
+
+            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            time.sleep(1)
+
+            btn = self.page.query_selector(".show-more-opportunity")
+            if btn and btn.is_visible():
+                btn.scroll_into_view_if_needed()
+                time.sleep(1)
+                try:
+                    btn.click()
+                except Exception:
+                    self.page.evaluate("element => element.click()", btn)
+                time.sleep(3)
+                scroll_count += 1
+                print(f"   ⏬ Loaded more campaigns (round {scroll_count})...")
+            else:
                 break
 
         soup = BeautifulSoup(self.page.content(), "html.parser")
-
-        excluded_keywords = ["gecmis", "arsiv", "tum-kampanyalar"]
+        excluded = ["gecmis", "arsiv", "tum-kampanyalar"]
 
         all_links = []
-        found_count = 0
-        skipped_count = 0
-
+        # First try .opportunity-result cards
         cards = soup.select(".opportunity-result a")
-        print(f"   ℹ️ Found {len(cards)} campaign cards in DOM")
-
+        print(f"   ℹ️ Found {len(cards)} opportunity-result links")
         for a in cards:
             href = a.get("href")
-            if not href:
-                continue
-            is_excluded = any(ex in href for ex in excluded_keywords) or "javascript" in href
-            if is_excluded:
-                skipped_count += 1
-            else:
+            if href and not any(ex in href for ex in excluded) and "javascript" not in href:
                 all_links.append(urljoin(self.BASE_URL, href))
-                found_count += 1
 
+        # Fallback: broad search
         if not all_links:
-            print("   ⚠️ No cards found with .opportunity-result, trying broad search...")
+            print("   ⚠️ No opportunity-result links, trying broad search...")
             for a in soup.find_all("a", href=True):
                 href = a["href"]
-                if "/kampanyalar/" in href and not any(ex in href for ex in excluded_keywords):
+                if "/kampanyalar/" in href and not any(ex in href for ex in excluded):
                     all_links.append(urljoin(self.BASE_URL, href))
 
         unique_urls = list(dict.fromkeys(all_links))
-        print(f"   ℹ️ Links extracted: {len(unique_urls)}, Skipped: {skipped_count}")
-
-        if limit and limit > 0:
+        if limit:
             unique_urls = unique_urls[:limit]
-
-        print(f"✅ Found {len(unique_urls)} unique campaigns to process")
+        print(f"✅ Found {len(unique_urls)} unique campaigns")
         return unique_urls
 
     def _extract_campaign_data(self, url: str) -> Optional[Dict[str, Any]]:
-        """Extract campaign data from detail page."""
         try:
             self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
             self.page.evaluate("window.scrollTo(0, 500)")
             time.sleep(2)
 
-            try:
-                self.page.wait_for_selector("h1", timeout=8000)
-            except Exception:
-                print("   ⚠️ Page load timeout/error")
-
             soup = BeautifulSoup(self.page.content(), "html.parser")
-
             title_el = soup.select_one("h1")
-            title = self._clean_text(title_el.text) if title_el else "Başlık Yok"
+            title = self._clean(title_el.text) if title_el else "Başlık Yok"
 
-            if (
-                "gecmis" in url or "#gecmis" in url
-                or "geçmiş" in title.lower()
-                or "süresi doldu" in title.lower()
-            ):
+            if "gecmis" in url or "geçmiş" in title.lower():
                 return None
 
             # Image
             image_url = None
-            try:
-                img_el = soup.select_one(".detail-img img") or soup.select_one("section img")
-                if img_el:
-                    src = img_el.get("data-original") or img_el.get("data-src") or img_el.get("src")
-                    if src and not src.startswith("data:"):
-                        image_url = urljoin(self.BASE_URL, src)
-                if not image_url:
-                    banner = soup.select_one("section.banner, div.banner")
-                    if banner and "style" in banner.attrs:
-                        match = re.search(r"url\(['\"]?(.*?)['\"]?\)", banner["style"])
-                        if match:
-                            image_url = urljoin(self.BASE_URL, match.group(1))
-            except Exception as e:
-                print(f"   ⚠️ Image extraction error: {e}")
-
+            img_el = soup.select_one(".detail-img img") or soup.select_one("section img")
+            if img_el:
+                src = img_el.get("data-original") or img_el.get("data-src") or img_el.get("src")
+                if src and not src.startswith("data:"):
+                    image_url = urljoin(self.BASE_URL, src)
             if not image_url:
-                print("   ⚠️ No image found, using default fallback.")
+                banner = soup.select_one("section.banner, div.banner")
+                if banner and "style" in banner.attrs:
+                    match = re.search(r"url\(['\"]?(.*?)['\"]?\)", banner["style"])
+                    if match:
+                        image_url = urljoin(self.BASE_URL, match.group(1))
+            if not image_url:
                 image_url = self.DEFAULT_IMAGE_URL
 
             # Date
             date_text = ""
             date_el = soup.select_one(".date, .campaign-date")
             if date_el:
-                date_text = self._clean_text(date_el.text)
+                date_text = self._clean(date_el.text)
             if not date_text:
-                full_page_text = soup.get_text()
-                date_match = re.search(
-                    r"(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})\s*-\s*(\d{1,2}\s+[a-zA-ZğüşıöçĞÜŞİÖÇ]+\s+\d{4})",
-                    full_page_text,
-                )
-                if date_match:
-                    date_text = date_match.group(0)
+                full_text = soup.get_text()
+                m = re.search(r"(\d{1,2}\s+\w+\s+\d{4})\s*-\s*(\d{1,2}\s+\w+\s+\d{4})", full_text)
+                if m:
+                    date_text = m.group(0)
 
-            # Participation & Conditions
-            participation_text = ""
+            # Content
+            content_div = soup.select_one(".detail-text, .campaign-content, section .container")
             conditions = []
             full_text = ""
-
-            content_div = soup.select_one(".detail-text, .campaign-content, section .container")
             if content_div:
-                part_label = content_div.find(
-                    string=re.compile(r"Katılım Şekli|Katılmak için", re.I)
-                )
-                if part_label:
-                    parent = part_label.find_parent("p") or part_label.find_parent("div")
-                    participation_text = self._clean_text(parent.get_text()) if parent else ""
-
-                raw_text = content_div.get_text("\n")
-                conditions = [
-                    self._clean_text(line)
-                    for line in raw_text.split("\n")
-                    if len(self._clean_text(line)) > 20
-                ]
+                raw = content_div.get_text("\n")
+                conditions = [self._clean(l) for l in raw.split("\n") if len(self._clean(l)) > 20]
                 full_text = " ".join(conditions)
             else:
-                full_text = self._clean_text(soup.get_text())[:1000]
-
-            if participation_text:
-                full_text += f"\nKATILIM ŞEKLİ: {participation_text}"
+                full_text = self._clean(soup.get_text())[:1000]
 
             conditions = [c for c in conditions if not c.startswith("Copyright")]
 
             return {
-                "title": title,
-                "image_url": image_url,
-                "date_text": date_text,
-                "full_text": full_text,
-                "conditions": conditions,
-                "source_url": url,
-                "participation": participation_text,
+                "title": title, "image_url": image_url,
+                "date_text": date_text, "full_text": full_text,
+                "conditions": conditions, "source_url": url,
             }
-
         except Exception as e:
             print(f"   ⚠️ Error extracting {url}: {e}")
             return None
@@ -281,10 +311,9 @@ class IsbankMaximumGencScraper:
             "eylül": "09", "ekim": "10", "kasım": "11", "aralık": "12",
         }
         try:
-            pattern = r"(\d{1,2})\s*([a-zğüşıöç]+)?\s*-\s*(\d{1,2})\s*([a-zğüşıöç]+)\s*(\d{4})"
-            match = re.search(pattern, text)
-            if match:
-                day1, month1, day2, month2, year = match.groups()
+            m = re.search(r"(\d{1,2})\s*([a-zğüşıöç]+)?\s*-\s*(\d{1,2})\s*([a-zğüşıöç]+)\s*(\d{4})", text)
+            if m:
+                day1, month1, day2, month2, year = m.groups()
                 if not month1:
                     month1 = month2
                 if is_end:
@@ -294,205 +323,143 @@ class IsbankMaximumGencScraper:
             pass
         return None
 
-    def _clean_text(self, text: str) -> str:
+    def _clean(self, text: str) -> str:
         if not text:
             return ""
-        text = text.replace("\n", " ").replace("\r", "")
-        text = re.sub(r"\s+", " ", text).strip()
-        return text
+        return re.sub(r"\s+", " ", text.replace("\n", " ").replace("\r", "")).strip()
 
-    def _process_campaign(self, url: str):
-        try:
-            with get_db_session() as db:
-                exists = db.query(Campaign).filter(
-                    Campaign.tracking_url == url,
-                    Campaign.card_id == self.card_id,
-                ).first()
-                if exists:
-                    print(f"   ⏭️  Skipped (Already exists): {url}")
-                    return "skipped"
-        except Exception as e:
-            print(f"   ⚠️ URL check failed: {e}")
+    def _get_or_create_slug(self, title: str) -> str:
+        base = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+        slug = base
+        counter = 1
+        while self.db.query(Campaign).filter(Campaign.slug == slug).first():
+            slug = f"{base}-{counter}"
+            counter += 1
+        return slug
+
+    def _process_campaign(self, url: str) -> str:
+        existing = self.db.query(Campaign).filter(
+            Campaign.tracking_url == url, Campaign.card_id == self.card_id
+        ).first()
+        if existing:
+            print("   ⏭️  Skipped (Already exists)")
+            return "skipped"
 
         print(f"🔍 Processing: {url}")
         data = self._extract_campaign_data(url)
         if not data:
-            print("   ⏭️  Skipped (No data or closed window)")
+            print("   ⏭️  Skipped")
             return "skipped"
 
-        ai_result = parse_api_campaign(
-            title=data["title"],
-            short_description=data["full_text"][:500],
-            content_html=data["full_text"],
-            bank_name=self.BANK_NAME,
-        )
-        return self._save_campaign(
-            data["title"], data["image_url"], data["date_text"], data["source_url"], ai_result
-        )
-
-    def _save_campaign(
-        self,
-        title: str,
-        image_url: Optional[str],
-        date_text: str,
-        source_url: str,
-        ai_data: Dict[str, Any],
-    ):
-        print(f"   💾 Saving campaign: {title[:30]}...")
         try:
-            with get_db_session() as db:
-                from src.models import Brand, CampaignBrand
-                from src.utils.slug_generator import get_unique_slug
-
-                slug = get_unique_slug(ai_data.get("short_title") or title, db, Campaign)
-
-                sector_name = ai_data.get("sector", "Diğer")
-                sector = db.query(Sector).filter(Sector.name == sector_name).first()
-                if not sector:
-                    sector = db.query(Sector).filter(Sector.slug == "diger").first()
-
-                start_date = None
-                if ai_data.get("start_date"):
-                    try:
-                        start_date = datetime.strptime(ai_data["start_date"], "%Y-%m-%d")
-                    except Exception:
-                        pass
-                if not start_date:
-                    sd = self._parse_date(date_text, is_end=False)
-                    if sd:
-                        try:
-                            start_date = datetime.strptime(sd, "%Y-%m-%d")
-                        except Exception:
-                            pass
-                if not start_date:
-                    start_date = datetime.now()
-
-                end_date = None
-                if ai_data.get("end_date"):
-                    try:
-                        end_date = datetime.strptime(ai_data["end_date"], "%Y-%m-%d")
-                    except Exception:
-                        pass
-                if not end_date:
-                    ed = self._parse_date(date_text, is_end=True)
-                    if ed:
-                        try:
-                            end_date = datetime.strptime(ed, "%Y-%m-%d")
-                        except Exception:
-                            pass
-
-                conditions_lines = []
-                participation = ai_data.get("participation")
-                if participation and participation != "Detayları İnceleyin":
-                    conditions_lines.append(f"KATILIM: {participation}")
-                if ai_data.get("conditions"):
-                    conditions_lines.extend(ai_data.get("conditions"))
-                conditions_text = "\n".join(conditions_lines)
-
-                eligible_cards_list = ai_data.get("cards", [])
-                eligible_cards_str = ", ".join(eligible_cards_list) if eligible_cards_list else None
-
-                campaign = Campaign(
-                    card_id=self.card_id,
-                    sector_id=sector.id if sector else None,
-                    slug=slug,
-                    title=ai_data.get("short_title") or title,
-                    description=ai_data.get("description") or title[:200],
-                    reward_text=ai_data.get("reward_text"),
-                    reward_value=ai_data.get("reward_value"),
-                    reward_type=ai_data.get("reward_type"),
-                    conditions=conditions_text,
-                    eligible_cards=eligible_cards_str,
-                    image_url=image_url,
-                    start_date=start_date,
-                    end_date=end_date,
-                    is_active=True,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
-                    tracking_url=source_url,
-                )
-                db.add(campaign)
-                print("   📝 Added to session...")
-
-                if ai_data.get("brands"):
-                    for brand_name in ai_data["brands"]:
-                        clean_name = brand_name.strip()
-                        if not clean_name:
-                            continue
-                        brand_slug = generate_slug(clean_name)
-                        brand = db.query(Brand).filter(Brand.slug == brand_slug).first()
-                        if not brand:
-                            brand = db.query(Brand).filter(Brand.name == clean_name).first()
-                        if not brand:
-                            brand = Brand(
-                                name=clean_name,
-                                slug=brand_slug,
-                                is_active=True,
-                                aliases=[clean_name],
-                            )
-                            db.add(brand)
-                            db.flush()
-                            print(f"      ✨ Created new brand: {clean_name}")
-                        else:
-                            print(f"      ✓ Brand exists: {clean_name}")
-
-                        db.flush()
-                        existing_link = db.query(CampaignBrand).filter(
-                            CampaignBrand.campaign_id == campaign.id,
-                            CampaignBrand.brand_id == brand.id,
-                        ).first()
-                        if not existing_link:
-                            link = CampaignBrand(campaign_id=campaign.id, brand_id=brand.id)
-                            db.add(link)
-                            print(f"      🔗 Linked brand: {clean_name}")
-
-                db.commit()
-                print(f"   ✅ Saved: {campaign.title} (ID: {campaign.id})")
-                return "saved"
+            ai_data = self.parser.parse_campaign_data(
+                raw_text=data["full_text"], bank_name=self.BANK_NAME
+            ) or {}
         except Exception as e:
-            print(f"   ❌ Save Failed: {e}")
-            import traceback
+            print(f"   ⚠️ AI error: {e}")
+            ai_data = {}
+
+        try:
+            slug = self._get_or_create_slug(ai_data.get("title") or data["title"])
+            ai_cat = ai_data.get("sector", "Diğer")
+            sector = self.db.query(Sector).filter(Sector.name == SECTOR_MAP.get(ai_cat, "Diğer")).first()
+            if not sector:
+                sector = self.db.query(Sector).filter(Sector.slug == 'diger').first()
+
+            start_date, end_date = None, None
+            for ai_key, is_end in [("start_date", False), ("end_date", True)]:
+                val = ai_data.get(ai_key)
+                dt = None
+                if val:
+                    try:
+                        dt = datetime.strptime(val, "%Y-%m-%d")
+                    except Exception:
+                        pass
+                if not dt:
+                    parsed = self._parse_date(data["date_text"], is_end=is_end)
+                    if parsed:
+                        try:
+                            dt = datetime.strptime(parsed, "%Y-%m-%d")
+                        except Exception:
+                            pass
+                if ai_key == "start_date":
+                    start_date = dt
+                else:
+                    end_date = dt
+
+            conds = ai_data.get("conditions", [])
+            part = ai_data.get("participation")
+            if part and "Detayları İnceleyin" not in part:
+                conds.insert(0, f"KATILIM: {part}")
+
+            campaign = Campaign(
+                card_id=self.card_id, sector_id=sector.id if sector else None,
+                slug=slug, title=ai_data.get("title") or data["title"],
+                description=ai_data.get("description") or data["title"][:200],
+                reward_text=ai_data.get("reward_text"),
+                reward_value=ai_data.get("reward_value"),
+                reward_type=ai_data.get("reward_type"),
+                conditions="\n".join(conds),
+                eligible_cards=", ".join(ai_data.get("cards", [])) or None,
+                image_url=data["image_url"],
+                start_date=start_date, end_date=end_date,
+                is_active=True, tracking_url=url,
+                created_at=datetime.utcnow(), updated_at=datetime.utcnow(),
+            )
+            self.db.add(campaign)
+            self.db.commit()
+
+            for b_name in ai_data.get("brands", []):
+                if len(b_name) < 2:
+                    continue
+                b_slug = re.sub(r'[^a-z0-9]+', '-', b_name.lower()).strip('-')
+                brand = self.db.query(Brand).filter(Brand.slug == b_slug).first()
+                if not brand:
+                    brand = Brand(name=b_name, slug=b_slug)
+                    self.db.add(brand)
+                    self.db.commit()
+                if not self.db.query(CampaignBrand).filter(
+                    CampaignBrand.campaign_id == campaign.id,
+                    CampaignBrand.brand_id == brand.id
+                ).first():
+                    self.db.add(CampaignBrand(campaign_id=campaign.id, brand_id=brand.id))
+                    self.db.commit()
+
+            print(f"   ✅ Saved: {campaign.title[:50]}")
+            return "saved"
+        except Exception as e:
+            self.db.rollback()
+            print(f"   ❌ Save failed: {e}")
             traceback.print_exc()
             return "error"
 
     def run(self, limit: Optional[int] = None):
-        """Main scraper entry point."""
         try:
-            print("🚀 Starting İşbankası Maximum Genç Scraper (Playwright mode)...")
+            print("🚀 Starting İşbankası Maximum Genç Scraper (Playwright)...")
             self._start_browser()
-
             urls = self._fetch_campaign_urls(limit=limit)
-
-            success_count = 0
-            skipped_count = 0
-            failed_count = 0
-
+            success, skipped, failed = 0, 0, 0
             for i, url in enumerate(urls, 1):
                 print(f"\n[{i}/{len(urls)}]")
                 try:
                     res = self._process_campaign(url)
                     if res == "saved":
-                        success_count += 1
+                        success += 1
                     elif res == "skipped":
-                        skipped_count += 1
+                        skipped += 1
                     else:
-                        failed_count += 1
+                        failed += 1
                 except Exception as e:
-                    print(f"❌ Error processing {url}: {e}")
-                    failed_count += 1
-
+                    print(f"❌ Error: {e}")
+                    failed += 1
                 time.sleep(1.5)
-
-            print("\n🏁 Scraping finished.")
-            print(
-                f"✅ Özet: {len(urls)} bulundu, {success_count} eklendi, "
-                f"{skipped_count + failed_count} atlandı/hata aldı."
-            )
+            print(f"\n🏁 Finished. {len(urls)} found, {success} saved, {skipped} skipped, {failed} errors")
         except Exception as e:
             print(f"❌ Scraper error: {e}")
             raise
         finally:
             self._stop_browser()
+            self.db.close()
 
 
 if __name__ == "__main__":
