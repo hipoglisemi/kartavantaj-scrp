@@ -436,8 +436,10 @@ class IsbankMaximilesScraper:
                 containers = soup.select(sel)
                 for container in containers:
                     text = container.get_text(separator="\n", strip=True)
-                    # Filter out breadcrumbs and very short fragments
-                    # Lowered threshold from 400 to 150 to catch shorter condition blocks
+                    if "Üzgünüz, aradığınız sayfayı bulamadık." in text or "Aradığınız sayfa sitemizden kaldırılmış" in text:
+                        print(f"      ⚠️ 404 Page Detected (Üzgünüz): {url}")
+                        return None
+                        
                     if len(text) > 150 and "Ana Sayfa" not in text[:80] and "Maximum Mobil" not in text[:50]:
                         # Check if this part is already substantially covered
                         is_duplicate = False
@@ -457,6 +459,10 @@ class IsbankMaximilesScraper:
                     
                 for tag in candidate_tags:
                     t = tag.get_text(separator="\n", strip=True)
+                    if "Üzgünüz, aradığınız sayfayı bulamadık." in t or "Aradığınız sayfa sitemizden kaldırılmış" in t:
+                        print(f"      ⚠️ 404 Page Detected (Üzgünüz): {url}")
+                        return None
+                        
                     if len(t) > 200 and "Üzgünüz" not in t and "Ana Sayfa" not in t[:50]:
                         content_parts.append(t)
 
