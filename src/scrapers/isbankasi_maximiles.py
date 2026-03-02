@@ -567,7 +567,7 @@ class IsbankMaximilesScraper:
 
         try:
             ai_data = self.parser.parse_campaign_data(
-                raw_text=data["full_text"], bank_name=self.BANK_NAME
+                raw_text=data["full_text"], bank_name=self.BANK_NAME, title=data["title"]
             ) or {}
         except Exception as e:
             self.db.rollback()

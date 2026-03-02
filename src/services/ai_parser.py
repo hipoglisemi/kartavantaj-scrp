@@ -331,7 +331,7 @@ class AIParser:
         clean_text = self._clean_text(raw_text)
         
         # Build prompt
-        prompt = self._build_prompt(clean_text, datetime.now().strftime("%Y-%m-%d"), bank_name)
+        prompt = self._build_prompt(clean_text, datetime.now().strftime("%Y-%m-%d"), bank_name, title)
         
         max_retries = 3
         for attempt in range(max_retries):
@@ -406,7 +406,7 @@ class AIParser:
         
         return text.strip()
     
-    def _build_prompt(self, raw_text: str, current_date: str, bank_name: Optional[str]) -> str:
+    def _build_prompt(self, raw_text: str, current_date: str, bank_name: Optional[str], page_title: Optional[str] = None) -> str:
         # 1. Clean Text (Remove boilerplate)
         cleaned_text = clean_campaign_text(raw_text)
         
@@ -419,11 +419,21 @@ class AIParser:
                     bank_instructions = rules
                     break
 
+        # 3. If page h1 title provided, lock it in the prompt
+        title_instruction = ""
+        if page_title and page_title.strip() and page_title.strip() != "Başlık Yok":
+            title_instruction = f"""
+🔒 BAŞLIK KILIDI: Bu kampanyanın resmi başlığı sayfadan alındı:
+"{page_title.strip()}"
+'title' alanına SADECE bu başlığı yaz. Metinden farklı bir başlık TÜRETME. Kısaltabilir veya dilbilgisi düzeltmesi yapabilirsin ama anlamı değiştirme.
+"""
+
         return f"""
 Sen uzman bir kampanya analistisin. Aşağıdaki kampanya metnini analiz et ve JSON formatında yapısal veriye dönüştür.
 Bugünün tarihi: {current_date} (Yıl: {datetime.now().year})
 
 {bank_instructions}
+{title_instruction}
 
 VALID SECTORS (BİRİNİ SEÇ — SADECE bu listeden):
 [Market & Gıda, Akaryakıt, Giyim & Aksesuar, Restoran & Kafe, Elektronik, Mobilya & Dekorasyon, Kozmetik & Sağlık, E-Ticaret, Ulaşım, Dijital Platform, Kültür & Sanat, Eğitim, Sigorta, Otomotiv, Vergi & Kamu, Turizm & Konaklama, Kuyum, Optik ve Saat, Diğer]
