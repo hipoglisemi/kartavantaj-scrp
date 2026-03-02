@@ -215,67 +215,73 @@ class AmericanExpressScraper:
             print(f"Stats: {self.stats}")
             
     def _process_campaign(self, url: str, headers: dict):
-        # Check if already exists
-        slug = url.rstrip('/').split('/')[-1]
+        # Check if already exists by URL
+        existing = self.db.query(Campaign).filter_by(tracking_url=url).first()
+        if existing:
+            print(f"  -> Already exists (url): {url}")
+            self.stats["skipped"] += 1
+            return
         
-        # Navigate to detail
+        # Check by URL slug as well
+        slug = url.rstrip('/').split('/')[-1]
+        existing_slug = self.db.query(Campaign).filter_by(slug=slug[:120]).first()
+        if existing_slug:
+            print(f"  -> Already exists (slug): {slug}")
+            self.stats["skipped"] += 1
+            return
+
+        # Navigate to detail — force utf-8 decoding
         response = requests.get(url, headers=headers, timeout=30)
         if not response.ok:
             raise Exception(f"Failed to load details: {response.status_code}")
+        response.encoding = 'utf-8'
             
         # Parse Page
         html = response.text
         soup = BeautifulSoup(html, 'html.parser')
         
-        # 1. Extractor logic based on common Amex structure
-        title_elem = soup.find('h1') or soup.find('h2')
+        # ─── 1. Title ────────────────────────────────────────────────────────────
+        title_elem = soup.find('h1')
         if not title_elem:
-             raise ValueError("Could not find campaign title (h1/h2)")
-        raw_title = title_elem.get_text(strip=True)
+            raise ValueError("Could not find campaign title (h1)")
+        raw_title = title_elem.get_text(separator=' ', strip=True)
         
-        # 2. Extract Image
+        # ─── 2. Hero Image ───────────────────────────────────────────────────────
+        # The hero image is inside section.campaing-details, it's the img that is
+        # NOT the logo and NOT the scroll gif:  col-px-left img
         img_url = None
-        # Often hero images are the first big image or an image within a specific banner class
-        images = soup.find_all('img')
-        for img in images:
-            src = img.get('src', '')
-            # Try to grab the largest/banner image, avoiding small icons/logos
-            if src and ('campaign' in src.lower() or 'banner' in src.lower() or 'hero' in src.lower()):
-                img_url = urljoin(self.BASE_URL, src)
-                break
-                
-        if not img_url and images:
-             # Fallback: grab the first image that isn't the logo
-             for img in images:
-                 src = img.get('src', '')
-                 if 'logo' not in src.lower() and src:
-                     img_url = urljoin(self.BASE_URL, src)
-                     break
-                     
-        # 3. Extract Conditions text
-        # Usually conditions are under "Diğer Bilgiler", "Kampanya Koşulları" or simply within <article>
-        conditions_text = []
+        detail_section = soup.find('section', class_=re.compile(r'campaing-details'))
+        if detail_section:
+            right_col = detail_section.find('div', class_=re.compile(r'col-px-left'))
+            if right_col:
+                first_img = right_col.find('img')
+                if first_img and first_img.get('src'):
+                    img_url = urljoin(self.BASE_URL, first_img['src'])
+            
+            if not img_url:
+                # fallback: any img that's not logo/gif
+                for img in detail_section.find_all('img'):
+                    src = img.get('src', '')
+                    img_cls = ' '.join(img.get('class', []))
+                    if src and 'logo' not in src.lower() and 'gif' not in img_cls.lower() and '.gif' not in src.lower():
+                        img_url = urljoin(self.BASE_URL, src)
+                        break
         
-        # Try finding the specific container first (if it exists)
-        target_divs = soup.find_all('div', class_=re.compile(r'detail|content|desc|koşul|kosul', re.I))
-        if target_divs:
-            for div in target_divs:
-                for p in div.find_all(['p', 'li']):
-                    text = p.get_text(strip=True)
-                    if text and len(text) > 10 and text not in conditions_text:
-                        conditions_text.append(text)
-        else:
-            # Fallback grab all paragraph and list text
-            for p in soup.find_all(['p', 'li']):
-                text = p.get_text(strip=True)
-                if text and len(text) > 15 and text not in conditions_text:
-                    conditions_text.append(text)
-                    
-        full_conditions = "\n".join(conditions_text)
-        if not full_conditions:
-            raise ValueError("Could not extract campaign conditions")
+        # ─── 3. Conditions ───────────────────────────────────────────────────────
+        # There can be multiple section.public-container-campaing-text sections
+        conditions_parts = []
+        content_sections = soup.find_all('section', class_=re.compile(r'public-container-campaing-text|public-container-campaing$'))
+        for section in content_sections:
+            text = section.get_text(separator='\n', strip=True)
+            if text and len(text) > 20:
+                conditions_parts.append(text)
+        
+        full_conditions = "\n\n".join(conditions_parts)
+        
+        if not full_conditions or len(full_conditions) < 20:
+            raise ValueError("Could not extract campaign conditions - no content sections found")
 
-        # 4. AI Parsing
+        # ─── 4. AI Parsing ───────────────────────────────────────────────────────
         print(f"  -> Title: {raw_title}")
         print("  -> Sending to AI for parsing...")
         ai_data = self.ai_parser.parse_campaign_data(
@@ -291,19 +297,19 @@ class AmericanExpressScraper:
         final_title = ai_data.get('title', raw_title)
         parsed_slug = self._slugify(final_title)
         
-        # Double check slug
-        existing_again = self.db.query(Campaign).filter(Campaign.slug == parsed_slug).first()
-        if existing_again:
-            print(f"  -> Campaign already exists (after parsing): {parsed_slug}")
+        # Check by AI-generated slug
+        existing_ai_slug = self.db.query(Campaign).filter(Campaign.slug == parsed_slug).first()
+        if existing_ai_slug:
+            print(f"  -> Campaign already exists (ai slug): {parsed_slug}")
             self.stats["skipped"] += 1
             return
 
         # Dates
         def parse_date(date_str):
-            if not date_str or date_str.lower() in ['none', 'null', 'belirtilmemiş']:
+            if not date_str or str(date_str).lower() in ['none', 'null', 'belirtilmemiş', '']:
                 return None
             try:
-                return datetime.strptime(date_str, '%Y-%m-%d').date()
+                return datetime.strptime(str(date_str), '%Y-%m-%d').date()
             except ValueError:
                 return None
 
@@ -317,7 +323,7 @@ class AmericanExpressScraper:
         sector_name = SECTOR_MAP.get(ai_sector_name, ai_sector_name) if ai_sector_name else 'Diğer'
         sector = self._get_or_create_sector(sector_name)
 
-        # 5. Insert Campaign
+        # ─── 5. Insert Campaign ──────────────────────────────────────────────────
         campaign = Campaign(
             title=final_title,
             slug=parsed_slug,
@@ -331,17 +337,17 @@ class AmericanExpressScraper:
             reward_value=ai_data.get('rewardValue'),
             is_active=True,
             conditions=full_conditions,
+            tracking_url=url,
         )
 
         self.db.add(campaign)
         self.db.commit()
 
-        # 6. Brands Linkage
+        # ─── 6. Brands Linkage ───────────────────────────────────────────────────
         brands_data = ai_data.get('brands', [])
         if brands_data:
             brands = self._get_or_create_brands(brands_data)
             for brand in brands:
-                # Deduplicate
                 exists = self.db.query(CampaignBrand).filter_by(
                     campaign_id=campaign.id, brand_id=brand.id
                 ).first()
@@ -350,7 +356,7 @@ class AmericanExpressScraper:
                     self.db.add(cb)
             self.db.commit()
 
-        print(f"  -> Saved successfully (ID: {campaign.id})")
+        print(f"  -> Saved successfully (ID: {campaign.id}, img: {bool(img_url)})")
         self.stats["saved"] += 1
 
 if __name__ == "__main__":
