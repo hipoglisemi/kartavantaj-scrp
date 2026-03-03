@@ -506,7 +506,7 @@ Bugünün tarihi: {current_date} (Yıl: {datetime.now().year})
 
 VALID- SECTOR:
     Pick ONE matching sector from this exact list:
-    ['Market & Gıda', 'Akaryakıt', 'Giyim & Aksesuar', 'Restoran & Kafe', 'Elektronik', 'Mobilya & Dekorasyon', 'Kozmetik & Sağlık', 'E-Ticaret', 'Ulaşım', 'Dijital Platform', 'Kültür & Sanat', 'Eğitim', 'Sigorta', 'Otomotiv', 'Vergi & Kamu', 'Turizm & Konaklama', 'Kuyum, Optik ve Saat', 'Diğer']
+    ['Market & Gıda', 'Akaryakıt', 'Giyim & Aksesuar', 'Restoran & Kafe', 'Elektronik', 'Mobilya & Dekorasyon', 'Kozmetik & Sağlık', 'E-Ticaret', 'Ulaşım', 'Dijital Platform', 'Kültür & Sanat', 'Eğitim', 'Sigorta', 'Otomotiv', 'Vergi & Kamu', 'Turizm & Konaklama', 'Kuyum, Optik ve Saat', 'Fatura & Telekomünikasyon', 'Anne, Bebek & Oyuncak', 'Kitap, Kırtasiye & Ofis', 'Evcil Hayvan & Petshop', 'Hizmet & Bireysel Gelişim', 'Finans & Yatırım', 'Diğer']
     🚨 NOTE: If the campaign is about Sports, Matches, Football, Theatre, or Concerts (e.g., UEFA, Galatasaray, tiyatro, sinema), it MUST be categorized as 'Kültür & Sanat' or 'Eğlence', NOT 'Diğer'.
 
 ⭐⭐⭐ KRİTİK KURALLAR (DOKUNULMAZ) ⭐⭐⭐
