@@ -101,7 +101,7 @@ class AkbankBaseScraper:
         print(f"✅ Found {len(campaign_urls)} campaigns for {self.card_name}")
         return campaign_urls
 
-    def _process_campaign(self, url: str):
+    def _process_campaign(self, url: str) -> str:
         """Process a single campaign URL"""
         print(f"🔍 Processing: {url}")
         try:
@@ -140,12 +140,13 @@ class AkbankBaseScraper:
             )
             
             # --- 3. Save to DB ---
-            self._save_campaign(title, details_text, image_url, ai_data, url)
+            return self._save_campaign(title, details_text, image_url, ai_data, url)
             
         except Exception as e:
             print(f"❌ Failed to process {url}: {e}")
+            return "error"
 
-    def _save_campaign(self, title, details_text, image_url, ai_data, source_url):
+    def _save_campaign(self, title, details_text, image_url, ai_data, source_url) -> str:
         with get_db_session() as db:
             from src.models import Sector
             from src.utils.slug_generator import get_unique_slug
@@ -161,7 +162,7 @@ class AkbankBaseScraper:
             
             if existing_url:
                 print(f"   ⏭️  Skipped (URL already exists): {source_url}")
-                return
+                return "skipped"
 
             # Ensure slug is unique using the utility
             slug = get_unique_slug(final_title, db, Campaign)
@@ -238,29 +239,80 @@ class AkbankBaseScraper:
             # --- Brands ---
             # Using normalize_brand_name utility
             if ai_data.get('brands'):
+                from src.models import Brand
                 for brand_name in ai_data['brands']:
-                    # normalization logic not imported here to keep it simple, 
-                    # relying on AI data usually being good enough or using utility if needed
-                    from src.models import Brand
-                    
                     b_slug = generate_slug(brand_name)
-                    brand = db.query(Brand).filter(Brand.slug == b_slug).first()
-                    if not brand:
-                        brand = Brand(name=brand_name, slug=b_slug, is_active=True)
-                        db.add(brand)
-                        db.commit()
+                    try:
+                        brand = db.query(Brand).filter(
+                            (Brand.slug == b_slug) | (Brand.name.ilike(brand_name))
+                        ).first()
                         
-                    cb = CampaignBrand(campaign_id=campaign.id, brand_id=brand.id)
-                    db.add(cb)
-                db.commit()
+                        if not brand:
+                            brand = Brand(name=brand_name, slug=b_slug, is_active=True)
+                            db.add(brand)
+                            db.commit()
+                            
+                        # Link brand to campaign
+                        cb = db.query(CampaignBrand).filter(
+                             CampaignBrand.campaign_id == campaign.id,
+                             CampaignBrand.brand_id == brand.id
+                        ).first()
+                        
+                        if not cb:
+                            cb = CampaignBrand(campaign_id=campaign.id, brand_id=brand.id)
+                            db.add(cb)
+                            db.commit()
+                    except Exception as e:
+                        db.rollback()
+                        print(f"   ⚠️ Could not link brand {brand_name}: {e}")
 
             print(f"   ✅ Saved: {campaign.title}")
+            return "saved"
 
     def run(self):
         print(f"🚀 Starting {self.card_name} Scraper...")
+        from src.utils.logger_utils import log_scraper_execution
+        
         urls = self._fetch_campaign_list()
+        
+        total_found = len(urls)
+        total_saved = 0
+        total_skipped = 0
+        total_failed = 0
+        error_details = []
+        
         for i, url in enumerate(urls):
             print(f"[{i+1}/{len(urls)}]", end=" ")
-            self._process_campaign(url)
+            try:
+                res = self._process_campaign(url)
+                if res == "saved":
+                    total_saved += 1
+                elif res == "skipped":
+                    total_skipped += 1
+                else:
+                    total_failed += 1
+            except Exception as e:
+                total_failed += 1
+                error_details.append({"url": url, "error": str(e)})
             time.sleep(1) # Polite delay
-        print("🏁 Scraping finished.")
+            
+        print(f"🏁 Scraping finished. Found: {total_found}, Saved: {total_saved}, Skipped: {total_skipped}, Failed: {total_failed}")
+        
+        # Determine status
+        status = "SUCCESS"
+        if total_failed > 0:
+            status = "PARTIAL" if (total_saved > 0 or total_skipped > 0) else "FAILED"
+            
+        # Log to database
+        with get_db_session() as db:
+            scraper_id = f"akbank_{self.card_name.lower()}"
+            log_scraper_execution(
+                db=db,
+                scraper_name=scraper_id,
+                status=status,
+                total_found=total_found,
+                total_saved=total_saved,
+                total_skipped=total_skipped,
+                total_failed=total_failed,
+                error_details={"errors": error_details} if error_details else None
+            )

@@ -344,23 +344,47 @@ class GarantiBonusScraper:
             brand_names = ai_data.get('brands', [])
             if brand_names:
                 for brand_name in brand_names:
-                    # Get or create brand
-                    brand = db.query(Brand).filter(Brand.name == brand_name).first()
-                    if not brand:
-                        brand = Brand(
-                            name=brand_name,
-                            slug=brand_name.lower().replace(' ', '-'),
-                            is_active=True
-                        )
-                        db.add(brand)
-                        db.flush()
-                    
-                    # Link brand to campaign
-                    campaign_brand = CampaignBrand(
-                        campaign_id=campaign.id,
-                        brand_id=brand.id
-                    )
-                    db.add(campaign_brand)
+                    # Generic safe slug generating for brand
+                    import re
+                    # Replace Turkish characters
+                    replacements = {'ı': 'i', 'ğ': 'g', 'ü': 'u', 'ş': 's', 'ö': 'o', 'ç': 'c', 'İ': 'i', 'Ğ': 'g', 'Ü': 'u', 'Ş': 's', 'Ö': 'o', 'Ç': 'c'}
+                    safe_slug = brand_name.lower().strip()
+                    for tr_char, en_char in replacements.items():
+                        safe_slug = safe_slug.replace(tr_char, en_char)
+                    # Remove non-alphanumeric and replace spaces
+                    safe_slug = re.sub(r'[^a-z0-9]+', '-', safe_slug).strip('-')
+
+                    try:
+                        # Get or create brand
+                        brand = db.query(Brand).filter(
+                            (Brand.slug == safe_slug) | (Brand.name.ilike(brand_name))
+                        ).first()
+                        
+                        if not brand:
+                            brand = Brand(
+                                name=brand_name,
+                                slug=safe_slug,
+                                is_active=True
+                            )
+                            db.add(brand)
+                            db.commit() # Commit to get ID and catch unique constraints early
+                        
+                        # Link brand to campaign
+                        campaign_brand = db.query(CampaignBrand).filter(
+                            CampaignBrand.campaign_id == campaign.id,
+                            CampaignBrand.brand_id == brand.id
+                        ).first()
+                        
+                        if not campaign_brand:
+                            campaign_brand = CampaignBrand(
+                                campaign_id=campaign.id,
+                                brand_id=brand.id
+                            )
+                            db.add(campaign_brand)
+                            db.commit()
+                    except Exception as e:
+                        db.rollback()
+                        print(f"   ⚠️ Could not link brand {brand_name}: {e}")
             
             db.commit()
             print(f"   ✅ Saved: {campaign.title[:50]}... (Reward: {campaign.reward_text})")
@@ -428,6 +452,8 @@ class GarantiBonusScraper:
         print("=" * 60)
         
         try:
+            from src.utils.logger_utils import log_scraper_execution
+            
             # Setup
             self._get_or_create_bank()
             self._get_or_create_card()
@@ -435,37 +461,90 @@ class GarantiBonusScraper:
             # Fetch campaign list
             campaign_urls = self._fetch_campaign_list()
             
-            if not campaign_urls:
-                print("❌ No campaigns found!")
-                return
-            
-            # Process campaigns
+            total_found = len(campaign_urls)
             success_count = 0
             skipped_count = 0
             failed_count = 0
+            error_details = []
+            
+            if not campaign_urls:
+                print("❌ No campaigns found!")
+                
+                with get_db_session() as db:
+                    log_scraper_execution(
+                        db=db,
+                        scraper_name="garanti_bonus",
+                        status="FAILED",
+                        total_found=0,
+                        total_saved=0,
+                        total_skipped=0,
+                        total_failed=0,
+                        error_details={"error": "No campaigns found"}
+                    )
+                return
+            
+            # Process campaigns
             for i, url in enumerate(campaign_urls, 1):
                 print(f"\n[{i}/{len(campaign_urls)}] Processing: {url}")
                 
-                result = self._process_campaign(url)
-                if result == "saved":
-                    success_count += 1
-                elif result == "skipped":
-                    skipped_count += 1
-                else:
+                try:
+                    result = self._process_campaign(url)
+                    if result == "saved":
+                        success_count += 1
+                    elif result == "skipped":
+                        skipped_count += 1
+                    else:
+                        failed_count += 1
+                        error_details.append({"url": url, "error": "Process campaign returned error"})
+                except Exception as e:
                     failed_count += 1
+                    error_details.append({"url": url, "error": str(e)})
+                    print(f"❌ Failed processing {url}: {e}")
                 
                 # Rate limiting
                 time.sleep(0.8)
             
             print(f"\n{'=' * 60}")
             print(f"✅ Scraping complete!")
-            print(f"✅ Özet: {len(campaign_urls)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+            print(f"✅ Özet: {total_found} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+            
+            # Determine status
+            status = "SUCCESS"
+            if failed_count > 0:
+                status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+                
+            # Log to DB
+            with get_db_session() as db:
+                log_scraper_execution(
+                    db=db,
+                    scraper_name="garanti_bonus",
+                    status=status,
+                    total_found=total_found,
+                    total_saved=success_count,
+                    total_skipped=skipped_count,
+                    total_failed=failed_count,
+                    error_details={"errors": error_details} if error_details else None
+                )
             
             # Clear cache
             clear_cache()
             
         except Exception as e:
             print(f"❌ Fatal error: {e}")
+            
+            with get_db_session() as db:
+                from src.utils.logger_utils import log_scraper_execution
+                log_scraper_execution(
+                    db=db,
+                    scraper_name="garanti_bonus",
+                    status="FAILED",
+                    total_found=0,
+                    total_saved=0,
+                    total_skipped=0,
+                    total_failed=1,
+                    error_details={"error": str(e)}
+                )
+                
             raise
 
 

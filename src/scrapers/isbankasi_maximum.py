@@ -681,6 +681,7 @@ class IsbankMaximumScraper:
     def run(self, limit: Optional[int] = None):
         try:
             print("🚀 Starting İşbankası Maximum Scraper (Playwright)...")
+            from src.utils.logger_utils import log_scraper_execution
             self._start_browser()
             
             # Close DB session to prevent idle connection timeout during long Playwright scroll
@@ -691,27 +692,36 @@ class IsbankMaximumScraper:
             active_urls, expired_urls = self._fetch_campaign_urls(limit=limit)
             
             # Evaluate expired campaigns logic
-            if expired_urls:
-                print(f"🛑 Found {len(expired_urls)} expired campaigns on list page. Checking DB for early end...")
-                for e_url in expired_urls:
-                    try:
-                        existing = self.db.query(Campaign).filter(
-                            Campaign.tracking_url == e_url,
-                            Campaign.card_id == self.card_id,
-                            Campaign.is_active == True
-                        ).first()
-                        if existing:
-                            print(f"   🛑 Desactivating expired campaign in DB: {existing.title}")
-                            existing.is_active = False
-                            self.db.commit()
-                    except Exception as e:
-                        if self.db:
-                            self.db.rollback()
-                        print(f"   ⚠️ Could not update expired campaign {e_url}: {e}")
+            # Use a new short-lived session context for this specific update
+            with self.engine.connect() as conn:
+                from sqlalchemy.orm import Session as SASession
+                with SASession(bind=conn) as temp_db:
+                    if expired_urls:
+                        print(f"🛑 Found {len(expired_urls)} expired campaigns on list page. Checking DB for early end...")
+                        for e_url in expired_urls:
+                            try:
+                                existing = temp_db.query(Campaign).filter(
+                                    Campaign.tracking_url == e_url,
+                                    Campaign.card_id == self.card_id,
+                                    Campaign.is_active == True
+                                ).first()
+                                if existing:
+                                    print(f"   🛑 Desactivating expired campaign in DB: {existing.title}")
+                                    existing.is_active = False
+                                    temp_db.commit()
+                            except Exception as e:
+                                temp_db.rollback()
+                                print(f"   ⚠️ Could not update expired campaign {e_url}: {e}")
                         
             urls = active_urls
 
+            # Reopen DB for main loop
+            Session = sessionmaker(bind=self.engine)
+            self.db = Session()
+
             success, skipped, failed = 0, 0, 0
+            error_details = []
+            
             for i, url in enumerate(urls, 1):
                 print(f"\n[{i}/{len(urls)}]")
                 try:
@@ -722,20 +732,60 @@ class IsbankMaximumScraper:
                         skipped += 1
                     else:
                         failed += 1
+                        error_details.append({"url": url, "error": "Process campaign returned error string"})
                 except Exception as e:
                     print(f"❌ Error: {e}")
                     if self.db:
                         self.db.rollback()
                     failed += 1
+                    error_details.append({"url": url, "error": str(e)})
                 time.sleep(1.5)
 
             print(f"\n🏁 Finished. {len(urls)} found, {success} saved, {skipped} skipped, {failed} errors")
+            
+            status = "SUCCESS"
+            if failed > 0:
+                status = "PARTIAL" if (success > 0 or skipped > 0) else "FAILED"
+                
+            log_scraper_execution(
+                db=self.db,
+                scraper_name="isbankasi_maximum",
+                status=status,
+                total_found=len(urls),
+                total_saved=success,
+                total_skipped=skipped,
+                total_failed=failed,
+                error_details={"errors": error_details} if error_details else None
+            )
+            
         except Exception as e:
             print(f"❌ Scraper error: {e}")
+            
+            status = "FAILED"
+            Session = sessionmaker(bind=self.engine)
+            err_db = Session()
+            from src.utils.logger_utils import log_scraper_execution
+            try:
+                log_scraper_execution(
+                    db=err_db,
+                    scraper_name="isbankasi_maximum",
+                    status=status,
+                    total_found=0,
+                    total_saved=0,
+                    total_skipped=0,
+                    total_failed=1,
+                    error_details={"error": str(e)}
+                )
+            except:
+                pass
+            finally:
+                err_db.close()
+                
             raise
         finally:
             self._stop_browser()
-            self.db.close()
+            if hasattr(self, 'db') and self.db:
+                self.db.close()
 
 
 if __name__ == "__main__":
