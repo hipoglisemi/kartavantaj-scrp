@@ -2,8 +2,8 @@ name: Data Quality Auto-Fixer
 
 on:
   schedule:
-    # TSİ 04:00, 09:00, 16:00, 21:00 → UTC 01:00, 06:00, 13:00, 18:00
-    - cron: '0 1,6,13,18 * * *'
+    # TSİ 06:00, 12:00, 18:00, 00:00 → UTC 03:00, 09:00, 15:00, 21:00
+    - cron: '0 3,9,15,21 * * *'
   workflow_dispatch: # Allows manual triggering from GitHub UI
 
 jobs:
