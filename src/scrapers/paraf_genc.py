@@ -78,6 +78,7 @@ class ParafGencScraper:
             success_count = 0
             skipped_count = 0
             failed_count = 0
+            error_details = []
             for i, campaign_data in enumerate(campaigns, 1):
                 url = urljoin(source['base'], campaign_data.get('url', ''))
                 print(f"   [{i}/{len(campaigns)}] {url}")
@@ -90,16 +91,42 @@ class ParafGencScraper:
                         skipped_count += 1
                     else:
                         failed_count += 1
+                        error_details.append({"url": url, "error": "Unknown DB failure"})
                         
                     time.sleep(1)  # Rate limiting
                 except Exception as e:
                     print(f"      ❌ Error: {e}")
                     failed_count += 1
+                    error_details.append({"url": url, "error": str(e)})
                     
             print(f"   ✅ Özet: {len(campaigns)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
             
+            status = "SUCCESS"
+            if failed_count > 0:
+                 status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+                 
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                log_scraper_execution(
+                     db=self.db,
+                     scraper_name="paraf-genc",
+                     status=status,
+                     total_found=len(campaigns),
+                     total_saved=success_count,
+                     total_skipped=skipped_count,
+                     total_failed=failed_count,
+                     error_details={"errors": error_details} if error_details else None
+                )
+            except Exception as le:
+                 print(f"⚠️ Could not save scraper log: {le}")
+            
         except Exception as e:
             print(f"   ❌ Source Error: {e}")
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                log_scraper_execution(self.db, "paraf-genc", "FAILED", 0, 0, 0, 1, {"error": str(e)})
+            except:
+                pass
             import traceback
             traceback.print_exc()
 

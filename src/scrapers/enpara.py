@@ -209,7 +209,7 @@ class EnparaScraper:
                 if e_date and not ai_data.get('end_date'): ai_data['end_date'] = e_date
 
             # Save to DB
-            self._save_campaign(
+            return self._save_campaign(
                 title=ai_data.get('short_title') or title,
                 details_text=title,
                 image_url=image_url,
@@ -217,10 +217,9 @@ class EnparaScraper:
                 ai_data=ai_data
             )
             
-            return True
         except Exception as e:
             print(f"   ❌ Error processing campaign {url}: {e}")
-            return False
+            return "error"
 
     def _save_campaign(self, title: str, details_text: str, image_url: Optional[str],
                        tracking_url: str, ai_data: Dict[str, Any]):
@@ -229,7 +228,7 @@ class EnparaScraper:
             existing = self.db.query(Campaign).filter(Campaign.tracking_url == tracking_url).first()
             if existing:
                 print(f"   ⏩ Skipping existing: {title}")
-                return
+                return "skipped"
 
             # Map sector
             sector_name = ai_data.get('sector', 'Diğer')
@@ -300,10 +299,12 @@ class EnparaScraper:
                 self.db.add(cb)
             
             self.db.commit()
+            return "saved"
 
         except Exception as e:
             self.db.rollback()
             print(f"   ❌ Error saving: {e}")
+            return "error"
 
     def run(self, limit: Optional[int] = None):
         print(f"🚀 Starting {self.BANK_NAME} Scraper...")
@@ -316,21 +317,39 @@ class EnparaScraper:
         success_count = 0
         skipped_count = 0
         failed_count = 0
+        error_details = []
 
         for link in links:
             try:
-                # _process_campaign could be modified to return a status string
-                # For now, we assume True is added, None/False is failed/skipped
                 result = self._process_campaign(link)
-                if result:
+                if result == "saved":
                     success_count += 1
+                elif result == "skipped" or result is None:
+                    skipped_count += 1
                 else:
                     failed_count += 1
             except Exception as e:
                 failed_count += 1
+                error_details.append({"url": link, "error": str(e)})
             time.sleep(1) # Soft rate limiting
             
-        print(f"\n✅ Özet: {len(links)} bulundu, {success_count} eklendi, {failed_count} atlandı/hata aldı.")
+        print(f"\n✅ Özet: {len(links)} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed_count > 0:
+             status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+             
+        from src.utils.logger_utils import log_scraper_execution
+        log_scraper_execution(
+             db=self.db,
+             scraper_name="enpara",
+             status=status,
+             total_found=len(links),
+             total_saved=success_count,
+             total_skipped=skipped_count,
+             total_failed=failed_count,
+             error_details={"errors": error_details} if error_details else None
+        )
         
         if success_count > 0:
             print("🧹 Clearing cache...")

@@ -353,11 +353,15 @@ class QNBScraper:
         success = 0
         skipped = 0
         failed = 0
+        error_details = []
 
         for i, item in enumerate(items):
             title = item.get("Title", "?")
             print(f"[{i+1}/{len(items)}] {title[:60]}")
             try:
+                # We need to call the method that actually processes
+                # Note: Currently QNB does all processing in _save_to_db 
+                # but the loop calls _process_item... wait, _process_item returns the result of _save_to_db!
                 res = self._process_item(item)
                 if res == "saved":
                     success += 1
@@ -365,15 +369,39 @@ class QNBScraper:
                     skipped += 1
                 else:
                     failed += 1
+                    error_details.append({"url": item.get("Id", "unknown"), "error": "Unknown DB failure"})
             except Exception as e:
                 print(f"   ❌ Failed: {e}")
                 failed += 1
+                error_details.append({"url": item.get("Id", "unknown"), "error": str(e)})
 
             # Small delay to avoid hammering AI API
             time.sleep(0.5)
 
         print(f"\n🏁 QNB Scraper Finished.")
-        print(f"✅ Özet: {len(items)} bulundu, {success} eklendi, {skipped + failed} atlandı/hata aldı.")
+        print(f"✅ Özet: {len(items)} bulundu, {success} eklendi, {skipped} atlandı, {failed} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed > 0:
+             status = "PARTIAL" if (success > 0 or skipped > 0) else "FAILED"
+             
+        try:
+            from src.utils.logger_utils import log_scraper_execution
+            from sqlalchemy.orm import sessionmaker
+            SessionLocal = sessionmaker(bind=self.engine)
+            with SessionLocal() as db:
+                 log_scraper_execution(
+                      db=db,
+                      scraper_name="qnb",
+                      status=status,
+                      total_found=len(items),
+                      total_saved=success,
+                      total_skipped=skipped,
+                      total_failed=failed,
+                      error_details={"errors": error_details} if error_details else None
+                 )
+        except Exception as le:
+             print(f"⚠️ Could not save scraper log: {le}")
 
 
 if __name__ == "__main__":

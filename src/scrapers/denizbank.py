@@ -629,12 +629,17 @@ class DenizbankScraper:
             print("   🆓 Mode: Direct Selenium (STEALTH ENABLED)")
             
         try:
+            from src.utils.logger_utils import log_scraper_execution
+            from sqlalchemy.orm import sessionmaker
+            SessionLocal = sessionmaker(bind=self.engine)
+            
             urls = self._fetch_campaign_list(limit=limit)
             print(f"   🎯 Processing {len(urls)} campaigns...")
             
             success_count = 0
             skipped_count = 0
             failed_count = 0
+            error_details = []
             
             for i, url in enumerate(urls, 1):
                 try:
@@ -645,16 +650,50 @@ class DenizbankScraper:
                         skipped_count += 1
                     else:
                         failed_count += 1
+                        error_details.append({"url": url, "error": "Save failed"})
                 except Exception as e:
                     print(f"   ❌ Failed: {e}")
                     failed_count += 1
+                    error_details.append({"url": url, "error": str(e)})
                 
                 # Sleep more if in free mode
                 if not ZENROWS_API_KEY:
                     time.sleep(random.uniform(4, 8))  # Daha uzun ve rastgele
                     
             print(f"✅ Özet: {len(urls)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+            
+            status = "SUCCESS"
+            if failed_count > 0:
+                status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+                
+            with SessionLocal() as db:
+                log_scraper_execution(
+                    db=db,
+                    scraper_name="denizbank",
+                    status=status,
+                    total_found=len(urls),
+                    total_saved=success_count,
+                    total_skipped=skipped_count,
+                    total_failed=failed_count,
+                    error_details={"errors": error_details} if error_details else None
+                )
                     
+        except Exception as e:
+            print(f"❌ Scraper exception: {e}")
+            from src.utils.logger_utils import log_scraper_execution
+            from sqlalchemy.orm import sessionmaker
+            SessionLocal = sessionmaker(bind=self.engine)
+            with SessionLocal() as db:
+                log_scraper_execution(
+                    db=db,
+                    scraper_name="denizbank",
+                    status="FAILED",
+                    total_found=0,
+                    total_saved=0,
+                    total_skipped=0,
+                    total_failed=1,
+                    error_details={"error": str(e)}
+                )
         finally:
             self.close_driver()
             print("🏁 Scraper Finished.")

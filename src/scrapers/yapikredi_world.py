@@ -278,6 +278,7 @@ class YapikrediWorldScraper:
         skipped_count = 0
         failed_count = 0
         total_found = 0
+        error_details = []
         
         while True:
             items = self._fetch_list(page)
@@ -311,9 +312,11 @@ class YapikrediWorldScraper:
                         skipped_count += 1
                     else:
                         failed_count += 1
+                        error_details.append({"url": item.get('Url', 'unknown'), "error": "Unknown DB failure"})
                 except Exception as e:
                     print(f"❌ Error processing item: {e}")
                     failed_count += 1
+                    error_details.append({"url": item.get('Url', 'unknown'), "error": str(e)})
             
             if active_count == 0 and len(items) > 0:
                 print("   All items on this page are expired. Stopping.")
@@ -322,7 +325,26 @@ class YapikrediWorldScraper:
             page += 1
             time.sleep(1)
 
-        print(f"\n✅ Özet: {total_found} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+        print(f"\n✅ Özet: {total_found} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed_count > 0:
+             status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+             
+        try:
+            from src.utils.logger_utils import log_scraper_execution
+            log_scraper_execution(
+                 db=self.db,
+                 scraper_name="yapikredi-world",
+                 status=status,
+                 total_found=total_found,
+                 total_saved=success_count,
+                 total_skipped=skipped_count,
+                 total_failed=failed_count,
+                 error_details={"errors": error_details} if error_details else None
+            )
+        except Exception as le:
+             print(f"⚠️ Could not save scraper log: {le}")
         
         # Clear cache so new campaigns appear immediately
         print("🧹 Clearing API cache...")

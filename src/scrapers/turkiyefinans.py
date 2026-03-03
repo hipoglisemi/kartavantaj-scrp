@@ -442,6 +442,12 @@ class TurkiyeFinansScraper:
         self._get_or_create_bank()
 
         cards_to_process = ["happy-card", "ala-card"] if target == "all" else [target]
+        
+        total_found = 0
+        total_saved = 0
+        total_skipped = 0
+        total_failed = 0
+        error_details = []
 
         try:
             self._start_browser()
@@ -449,13 +455,20 @@ class TurkiyeFinansScraper:
             for card_key in cards_to_process:
                 card_def = CARD_DEFINITIONS[card_key]
                 print(f"\n👉 Processing {card_def['name']}...")
-                card_id = self._get_or_create_card(card_def)
+                try:
+                    card_id = self._get_or_create_card(card_def)
+                except Exception as e:
+                    print(f"   ❌ Card error: {e}")
+                    total_failed += 1
+                    error_details.append({"url": "card_init", "error": f"Card error for {card_key}: {str(e)}"})
+                    continue
 
                 links = self._collect_links(card_key)
                 if not links:
                     print(f"   ⚠️ No links found for {card_def['name']}")
                     continue
-
+                
+                total_found += len(links[:limit])
                 links_to_process = links[:limit]
                 print(f"   🎯 Processing {len(links_to_process)} campaigns...")
 
@@ -469,21 +482,60 @@ class TurkiyeFinansScraper:
                         res = self._process_campaign(url, card_key, card_id)
                         if res == "saved":
                             success_count += 1
+                            total_saved += 1
                         elif res == "skipped":
                             skipped_count += 1
+                            total_skipped += 1
                         else:
                             failed_count += 1
+                            total_failed += 1
+                            error_details.append({"url": url, "error": "Unknown DB DB failure or skipping condition"})
                     except Exception as e:
                         print(f"   ❌ Error: {e}")
                         failed_count += 1
+                        total_failed += 1
+                        error_details.append({"url": url, "error": str(e)})
 
                     time.sleep(1.5)
 
-                print(f"✅ {card_def['name']} Özet: {len(links_to_process)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata.")
+                print(f"✅ {card_def['name']} Özet: {len(links_to_process)} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata.")
+            
+            print("\n🏁 Türkiye Finans Scraper Finished.")
+            
+            status = "SUCCESS"
+            if total_failed > 0:
+                 status = "PARTIAL" if (total_saved > 0 or total_skipped > 0) else "FAILED"
+                 
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                from sqlalchemy.orm import sessionmaker
+                SessionLocal = sessionmaker(bind=self.engine)
+                with SessionLocal() as db:
+                     log_scraper_execution(
+                          db=db,
+                          scraper_name="turkiye-finans",
+                          status=status,
+                          total_found=total_found,
+                          total_saved=total_saved,
+                          total_skipped=total_skipped,
+                          total_failed=total_failed,
+                          error_details={"errors": error_details} if error_details else None
+                     )
+            except Exception as le:
+                 print(f"⚠️ Could not save scraper log: {le}")
 
+        except Exception as e:
+            print(f"❌ Fatal error: {e}")
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                from sqlalchemy.orm import sessionmaker
+                SessionLocal = sessionmaker(bind=self.engine)
+                with SessionLocal() as db:
+                     log_scraper_execution(db, "turkiye-finans", "FAILED", total_found, total_saved, total_skipped, total_failed + 1, {"error": str(e), "details": error_details})
+            except:
+                pass
         finally:
             self._stop_browser()
-            print("\n🏁 Türkiye Finans Scraper Finished.")
 
 
 if __name__ == "__main__":

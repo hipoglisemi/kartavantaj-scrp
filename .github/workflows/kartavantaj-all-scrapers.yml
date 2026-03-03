@@ -16,7 +16,7 @@ on:
           - akbank_business
           - akbank_free
           - akbank_wings
-          - american_express
+          - americanexpress
           - chippin
           - denizbank
           - enpara
@@ -57,7 +57,7 @@ jobs:
     steps:
       - id: set-matrix
         run: |
-          ALL='["akbank_axess","akbank_business","akbank_free","akbank_wings","american_express","chippin","denizbank","enpara","garanti_bonus","garanti_milesandsmiles","garanti_shopandfly","isbankasi_genc","isbankasi_maximiles","isbankasi_maximum","masterpass","paraf","paraf_genc","param","qnb","teb","turkiyefinans","vakifbank","yapikredi_adios","yapikredi_crystal","yapikredi_play","yapikredi_world","ziraat"]'
+          ALL='["akbank_axess","akbank_business","akbank_free","akbank_wings","americanexpress","chippin","denizbank","enpara","garanti_bonus","garanti_milesandsmiles","garanti_shopandfly","isbankasi_genc","isbankasi_maximiles","isbankasi_maximum","masterpass","paraf","paraf_genc","param","qnb","teb","turkiyefinans","vakifbank","yapikredi_adios","yapikredi_crystal","yapikredi_play","yapikredi_world","ziraat"]'
           INPUT="${{ github.event.inputs.scraper }}"
           if [ -z "$INPUT" ] || [ "$INPUT" = "all" ]; then
             echo "scrapers=$ALL" >> $GITHUB_OUTPUT

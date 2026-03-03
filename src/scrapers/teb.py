@@ -369,6 +369,7 @@ class TEBScraper:
         print(f"\n   🎯 Processing {len(items)} campaigns...\n")
 
         success = skipped = failed = 0
+        error_details = []
 
         for idx, item in enumerate(items):
             title = item.get("title", "?")[:60]
@@ -382,9 +383,11 @@ class TEBScraper:
             except Exception as e:
                 print(f"   ❌ Card error: {e}")
                 failed += 1
+                error_details.append({"url": item.get("weblink", "unknown"), "error": f"Card error: {str(e)}"})
                 continue
 
             try:
+                # Same issue as QNB: _process_item actually needs to return the result of _save_to_db, but it is already doing that.
                 res = self._process_item(item, card_id, card_def["name"])
                 if res == "saved":
                     success += 1
@@ -392,14 +395,38 @@ class TEBScraper:
                     skipped += 1
                 else:
                     failed += 1
+                    error_details.append({"url": item.get("weblink", "unknown"), "error": "Unknown DB failure"})
             except Exception as e:
                 print(f"   ❌ Failed: {e}")
                 failed += 1
+                error_details.append({"url": item.get("weblink", "unknown"), "error": str(e)})
 
             time.sleep(0.5)
 
         print(f"\n🏁 TEB Scraper Finished.")
-        print(f"✅ Özet: {len(items)} bulundu, {success} eklendi, {skipped + failed} atlandı/hata aldı.")
+        print(f"✅ Özet: {len(items)} bulundu, {success} eklendi, {skipped} atlandı, {failed} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed > 0:
+             status = "PARTIAL" if (success > 0 or skipped > 0) else "FAILED"
+             
+        try:
+            from src.utils.logger_utils import log_scraper_execution
+            from sqlalchemy.orm import sessionmaker
+            SessionLocal = sessionmaker(bind=self.engine)
+            with SessionLocal() as db:
+                 log_scraper_execution(
+                      db=db,
+                      scraper_name="teb",
+                      status=status,
+                      total_found=len(items),
+                      total_saved=success,
+                      total_skipped=skipped,
+                      total_failed=failed,
+                      error_details={"errors": error_details} if error_details else None
+                 )
+        except Exception as le:
+             print(f"⚠️ Could not save scraper log: {le}")
 
 
 if __name__ == "__main__":

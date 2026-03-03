@@ -723,6 +723,7 @@ class IsbankMaximilesScraper:
                         
             urls = active_urls
             success, skipped, failed = 0, 0, 0
+            error_details = []
             for i, url in enumerate(urls, 1):
                 print(f"\n[{i}/{len(urls)}]")
                 try:
@@ -733,19 +734,47 @@ class IsbankMaximilesScraper:
                         skipped += 1
                     else:
                         failed += 1
+                        error_details.append({"url": url, "error": "Unknown DB failure"})
                 except Exception as e:
                     print(f"❌ Error: {e}")
-                    if self.db:
-                        self.db.rollback()
                     failed += 1
+                    error_details.append({"url": url, "error": str(e)})
                 time.sleep(1.5)
             print(f"\n🏁 Finished. {len(urls)} found, {success} saved, {skipped} skipped, {failed} errors")
+            
+            status = "SUCCESS"
+            if failed > 0:
+                 status = "PARTIAL" if (success > 0 or skipped > 0) else "FAILED"
+                 
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                Session = sessionmaker(bind=self.engine)
+                with Session() as db:
+                     log_scraper_execution(
+                          db=db,
+                          scraper_name="maximiles",
+                          status=status,
+                          total_found=len(urls),
+                          total_saved=success,
+                          total_skipped=skipped,
+                          total_failed=failed,
+                          error_details={"errors": error_details} if error_details else None
+                     )
+            except Exception as le:
+                 print(f"⚠️ Could not save scraper log: {le}")
+                 
         except Exception as e:
             print(f"❌ Scraper error: {e}")
+            try:
+                from src.utils.logger_utils import log_scraper_execution
+                Session = sessionmaker(bind=self.engine)
+                with Session() as db:
+                     log_scraper_execution(db, "maximiles", "FAILED", 0, 0, 0, 1, {"error": str(e)})
+            except:
+                pass
             raise
         finally:
             self._stop_browser()
-            self.db.close()
 
 
 if __name__ == "__main__":

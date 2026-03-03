@@ -177,6 +177,7 @@ class ChippinScraper:
             success_count = 0
             skipped_count = 0
             failed_count = 0
+            error_details = []
             
             for idx, c in enumerate(campaigns_to_process):
                 title = c.get("webName")
@@ -302,11 +303,36 @@ class ChippinScraper:
                 except Exception as e:
                     print(f"   ❌ DB Error: {e}")
                     failed_count += 1
+                    error_details.append({"url": tracking_url, "error": f"DB Error: {str(e)}"})
 
         except Exception as e:
             print(f"   ❌ Error: {e}")
+            failed_count += 1
+            error_details.append({"url": url, "error": str(e)})
             
-        print(f"✅ Özet: {len(campaigns_to_process)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+        print(f"✅ Özet: {len(campaigns_to_process)} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+
+        status = "SUCCESS"
+        if failed_count > 0:
+             status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+
+        try:
+             from src.utils.logger_utils import log_scraper_execution
+             from sqlalchemy.orm import sessionmaker
+             Session = sessionmaker(bind=self.engine)
+             with Session() as session:
+                  log_scraper_execution(
+                      db=session,
+                      scraper_name="chippin",
+                      status=status,
+                      total_found=len(campaigns_to_process),
+                      total_saved=success_count,
+                      total_skipped=skipped_count,
+                      total_failed=failed_count,
+                      error_details={"errors": error_details} if error_details else None
+                  )
+        except Exception as log_e:
+             print(f"⚠️ Could not save scraper log: {log_e}")
 
 if __name__ == "__main__":
     import argparse

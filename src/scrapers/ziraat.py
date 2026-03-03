@@ -436,20 +436,47 @@ class ZiraatScraper:
         success_count = 0
         skipped_count = 0
         failed_count = 0
+        error_details = []
 
         for camp in campaigns:
             if count >= limit:
                 print(f"🛑 Reached MAX_CAMPAIGNS_PER_RUN limit ({limit})")
                 break
             
-            res = self._process_campaign(camp)
-            if res == "saved": success_count += 1
-            elif res == "skipped": skipped_count += 1
-            else: failed_count += 1
+            try:
+                res = self._process_campaign(camp)
+                if res == "saved": success_count += 1
+                elif res == "skipped": skipped_count += 1
+                else: 
+                    failed_count += 1
+                    error_details.append({"url": camp.get('url', 'unknown'), "error": "Unknown DB failure"})
+            except Exception as e:
+                failed_count += 1
+                error_details.append({"url": camp.get('url', 'unknown'), "error": str(e)})
             
             count += 1
             time.sleep(2)
-        print(f"✅ Özet: {len(campaigns)} bulundu, {success_count} eklendi, {skipped_count + failed_count} atlandı/hata aldı.")
+        print(f"✅ Özet: {len(campaigns)} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed_count > 0:
+             status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+             
+        try:
+            from src.utils.logger_utils import log_scraper_execution
+            log_scraper_execution(
+                 db=self.db,
+                 scraper_name="ziraat",
+                 status=status,
+                 total_found=len(campaigns),
+                 total_saved=success_count,
+                 total_skipped=skipped_count,
+                 total_failed=failed_count,
+                 error_details={"errors": error_details} if error_details else None
+            )
+        except Exception as le:
+             print(f"⚠️ Could not save scraper log: {le}")
+             
         print("🏁 Finished.")
 
 if __name__ == "__main__":

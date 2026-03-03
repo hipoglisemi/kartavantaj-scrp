@@ -202,7 +202,7 @@ class VakifbankScraper:
             
             if not ai_data:
                 print("   ❌ AI Parsing failed (Returned None). Skipping.")
-                return
+                return "error"
 
             title = ai_data.get("title", "Kampanya")
             desc = ai_data.get("description", "")
@@ -265,7 +265,7 @@ class VakifbankScraper:
             existing = self.db.query(Campaign).filter(Campaign.tracking_url == url).first()
             if existing:
                 print(f"   ⏭️ Skipped (Already exists, preserving manual edits): {title[:50]}...")
-                return
+                return "skipped"
 
             campaign = Campaign(
                 card_id=self.card_id,
@@ -313,11 +313,13 @@ class VakifbankScraper:
                         self.db.commit()
 
             print(f"   ✅ Saved: {title} | Sector: {db_sector_name} | Brands: {brands}")
+            return "saved"
             
         except Exception as e:
             print(f"   ❌ Error: {e}")
             self.db.rollback()
             traceback.print_exc()
+            return "error"
 
     def run(self):
         print("🚀 Starting VakıfBank Scraper (Powered by Kartavantaj AI Parser)...")
@@ -326,19 +328,45 @@ class VakifbankScraper:
         success_count = 0
         skipped_count = 0
         failed_count = 0
+        error_details = []
         
         for i, url in enumerate(urls):
             try:
-                # _process_campaign could be modified to return a status string
-                # We'll just assume True if it completes (could be skipped inside though)
-                self._process_campaign(url)
-                success_count += 1
+                res = self._process_campaign(url)
+                if res == "saved":
+                    success_count += 1
+                elif res == "skipped":
+                    skipped_count += 1
+                else:
+                    failed_count += 1
+                    error_details.append({"url": url, "error": "Save failed"})
             except Exception as e:
                 failed_count += 1
+                error_details.append({"url": url, "error": str(e)})
                 
             time.sleep(2) # Rate limiting
             
-        print(f"\n✅ Özet: {len(urls)} bulundu, {success_count} işlendi, {failed_count} hata aldı.")
+        print(f"\n✅ Özet: {len(urls)} bulundu, {success_count} eklendi, {skipped_count} atlandı, {failed_count} hata aldı.")
+        
+        status = "SUCCESS"
+        if failed_count > 0:
+             status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
+             
+        try:
+            from src.utils.logger_utils import log_scraper_execution
+            log_scraper_execution(
+                 db=self.db,
+                 scraper_name="vakifbank",
+                 status=status,
+                 total_found=len(urls),
+                 total_saved=success_count,
+                 total_skipped=skipped_count,
+                 total_failed=failed_count,
+                 error_details={"errors": error_details} if error_details else None
+            )
+        except Exception as le:
+             print(f"⚠️ Could not save scraper log: {le}")
+        
         print("🏁 Finished.")
 
 if __name__ == "__main__":
