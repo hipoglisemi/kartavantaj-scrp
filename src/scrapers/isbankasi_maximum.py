@@ -370,24 +370,18 @@ class IsbankMaximumScraper:
                     break
 
             # Description / Conditions
-            desc_el = soup.select_one("span[id$='CampaignDescription']")
-            conditions = []
+            desc_el = soup.select_one(".campaign-detail, .campaignDetail, .content, .detail-content, .editor-content")
             full_text = ""
             if desc_el:
                 for br in desc_el.find_all("br"):
                     br.replace_with("\n")
-                raw = desc_el.get_text()
-                conditions = [self._clean(l) for l in raw.split("\n") if len(self._clean(l)) > 15]
-                full_text = " ".join(conditions)
+                full_text = "\n".join([self._clean(l) for l in desc_el.get_text().split("\n") if len(self._clean(l)) > 0])
             else:
-                full_text = self._clean(soup.get_text())[:1500]
-
-            if participation_text:
-                full_text += f"\nKATILIM ŞEKLİ: {participation_text}"
+                full_text = self._clean(soup.get_text())[:2000]
 
             # Image
             image_url = None
-            img_el = soup.select_one("img[id$='CampaignImage']")
+            img_el = soup.select_one("img[id$='CampaignImage']") or soup.select_one('.campaign-detail img')
             if img_el:
                 src = img_el.get("data-original") or img_el.get("data-src") or img_el.get("src")
                 if src and not src.startswith("data:"):
@@ -396,8 +390,8 @@ class IsbankMaximumScraper:
             return {
                 "title": title, "image_url": image_url,
                 "date_text": date_text, "full_text": full_text,
-                "conditions": conditions, "source_url": url,
-                "raw_text": html_content # For AI parsing
+                "source_url": url,
+                "raw_text": full_text # Feed clean text to AI, not entire HTML
             }
         except Exception as e:
             print(f"   ⚠️ Error extracting {url}: {e}")
