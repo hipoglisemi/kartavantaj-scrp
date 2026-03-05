@@ -252,6 +252,8 @@ class IsbankMaximilesScraper:
         self.page.goto(self.CAMPAIGNS_URL, wait_until="domcontentloaded", timeout=120000)
         time.sleep(5)
 
+        EXPIRED_MARKERS = ["sona ermiştir", "bitmiştir", "sona erdi", "süresi doldu", "kampanya sona"]
+
         prev_count = 0
         scroll_count = 0
         while scroll_count < 30:
@@ -262,6 +264,13 @@ class IsbankMaximilesScraper:
             ])
             if limit and count >= limit:
                 break
+
+            # ── Yeni ekleme: Expired bölümüne girdik mi? ──────────────
+            page_text_lower = soup.get_text(separator=" ", strip=True).lower()
+            if any(m in page_text_lower for m in EXPIRED_MARKERS):
+                print(f"   🛑 'Kampanya sona ermiştir' detected on page — stopping scroll to avoid expired campaigns.")
+                break
+            # ─────────────────────────────────────────────────────────
 
             # Try load more button
             btn = self.page.query_selector("button:has-text('Daha Fazla'), a.CampAllShow")
@@ -336,13 +345,19 @@ class IsbankMaximilesScraper:
                 if not is_exact_category and not is_category_suffix and not is_common_page and len(href) > 25:
                     full_url = urljoin(self.BASE_URL, a["href"])
                     
-                    # Sona ermiş kampanya tespiti
-                    parent_text = ""
-                    parent = a.find_parent("div", class_="card") or a.find_parent("div", class_="campaign-card") or a.find_parent("div", class_="opportunity-result") or a.parent
-                    if parent:
-                        parent_text = parent.get_text(separator=" ", strip=True).lower()
+                    # Sona ermiş kampanya tespiti — tüm ata elementleri tara
+                    # (class adına bağlı kalmak yerine DOM'un tamamına bak)
+                    expired = False
+                    for ancestor in a.parents:
+                        ancestor_text = ancestor.get_text(separator=" ", strip=True).lower()
+                        if any(m in ancestor_text for m in EXPIRED_MARKERS):
+                            expired = True
+                            break
+                        # Kök elemente ulaştık, daha yukarı gitmeye gerek yok
+                        if ancestor.name in ("body", "html"):
+                            break
                         
-                    if "sona ermiştir" in parent_text or "bitmiştir" in parent_text or "sona erdi" in parent_text or "süresi doldu" in parent_text:
+                    if expired:
                         expired_links.append(full_url)
                     else:
                         all_links.append(full_url)
@@ -354,6 +369,7 @@ class IsbankMaximilesScraper:
             
         print(f"✅ Found {len(unique_urls)} active campaigns, and {len(unique_expired)} expired campaigns")
         return unique_urls, unique_expired
+
 
     def _extract_campaign_data(self, url: str) -> Optional[Dict[str, Any]]:
         try:
