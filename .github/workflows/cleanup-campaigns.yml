@@ -1,4 +1,4 @@
-name: Archive Expired Campaigns
+name: Cleanup Expired Campaigns
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch: # Allow manual trigger
 
 jobs:
-  archive-campaigns:
+  cleanup-campaigns:
     runs-on: ubuntu-22.04
     
     steps:
@@ -24,8 +24,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Run Archiving Script
+    - name: Run Cleanup Script
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
-        python archive_expired.py
+        python cleanup_expired.py
