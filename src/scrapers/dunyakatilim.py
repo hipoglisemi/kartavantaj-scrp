@@ -231,10 +231,10 @@ class DunyaKatilimScraper:
                 card_name=source['default_card']
             )
             
-            if not ai_data:
-                print("      ❌ AI parsing failed")
+            if not ai_data or ai_data.get("_ai_failed"):
+                print("      ❌ AI parsing failed (rate limit veya timeout) — kayıt atlandı")
                 return "error"
-                
+
             # Save
             return self._save_campaign(ai_data, url, image_url, source['default_card'])
             

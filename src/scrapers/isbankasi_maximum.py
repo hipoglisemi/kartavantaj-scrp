@@ -604,8 +604,8 @@ class IsbankMaximumScraper:
                             Campaign.is_active == True
                         ).first()
                         if existing:
-                            print(f"   🛑 Deactivating expired campaign in DB: {existing.title}")
-                            existing.is_active = False
+                            print(f"   🛑 Deleting expired campaign from DB: {existing.title}")
+                            self.session.delete(existing)
                             self.session.commit()
                     except Exception as e:
                         self.session.rollback()
