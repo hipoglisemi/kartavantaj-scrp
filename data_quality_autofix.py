@@ -20,7 +20,10 @@ import re
 import uuid
 from src.models import Campaign, Sector, Brand, CampaignBrand
 from src.database import get_db_session
-from src.services.ai_parser import parse_campaign_data
+from src.services.ai_parser import parse_campaign_data, AIParser
+
+# Shared cleaner — same preprocessing scrapers use (filters boilerplate, dedup, 6K limit)
+_clean_text = AIParser._clean_text
 
 SECTOR_MAP = {
     "Market & Gıda": "market-gida",
@@ -156,10 +159,10 @@ def run_autofix():
                     print(f"   ❌ Could not extract meaningful text from URL. Skipping.")
                     continue
                 
-                # We limit the text size to save tokens
-                text_to_parse = html_text[:15000]
-                
-                print(f"   🤖 Sending {len(text_to_parse)} characters to Gemini AI for re-parsing...")
+                # Clean text with the same preprocessor scrapers use
+                text_to_parse = _clean_text(None, html_text)
+
+                print(f"   🤖 Sending {len(text_to_parse)} characters to AI for re-parsing...")
                 ai_data = parse_campaign_data(
                     raw_text=text_to_parse,
                     title=c.title,
