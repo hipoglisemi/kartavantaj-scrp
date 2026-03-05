@@ -95,8 +95,7 @@ class YapikrediAdiosScraper:
         if url_suffix.startswith('http'):
             full_url = url_suffix
         else:
-            # Force worldcard.com.tr for correct deep-linking in World Mobil app
-            full_url = f"https://www.worldcard.com.tr{url_suffix}"
+            full_url = f"{self.BASE_URL}{url_suffix}"
         
         existing = self.db.query(Campaign).filter(Campaign.tracking_url == full_url).first()
         if existing:
