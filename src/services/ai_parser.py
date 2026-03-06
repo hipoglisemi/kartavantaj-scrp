@@ -447,8 +447,9 @@ class AIParser:
     def _call_ai(self, prompt: str, timeout_sec: int = 65) -> str:
         """Send prompt to active AI provider. Rotation happens in the retry loop."""
         import time
-        time.sleep(4.5)  # Enforce ~13 RPM to respect the 15 RPM free-tier limit
+        
         if self._provider == "groq":
+            time.sleep(2)  # Groq has a 30 RPM limit (~2 seconds is perfectly safe for 30 requests/min)
             client = self._groq_clients[self._groq_key_index]
             completion = client.chat.completions.create(
                 model=self._groq_model,
@@ -459,6 +460,7 @@ class AIParser:
             )
             return completion.choices[0].message.content.strip()
         else:
+            time.sleep(4.5)  # Enforce ~13 RPM to respect Gemini's 15 RPM free-tier limit
             # google-genai SDK: client.models.generate_content()
             active_client = self._gemini_clients[self._gemini_key_index]
             response = call_with_timeout(
