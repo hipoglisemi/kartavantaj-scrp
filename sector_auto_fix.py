@@ -4,10 +4,15 @@ Sector Auto-Fixer
 Intelligently re-categorizes campaigns in the 'Diğer' (Other) sector using Gemini AI.
 """
 
+import json
+import re
+from typing import Dict, Optional
+import time
+
+from src.services.database import get_db_connection
+from src.services.ai_parser import AIParser
 import os
 import sys
-import time
-import google.generativeai as genai
 from dotenv import load_dotenv
 
 # Add project root to path

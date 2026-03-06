@@ -16,7 +16,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.dialects.postgresql import JSONB
 
 # AI
-import google.generativeai as genai
 from services.ai_parser import AIParser
 from services.brand_normalizer import cleanup_brands
 
