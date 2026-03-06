@@ -370,7 +370,7 @@ else:
     # Gemini — new google-genai SDK (replaces deprecated google-generativeai)
     from google import genai as _genai_sdk
 
-    _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+    _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 
     _gemini_keys: list = []
     for i in range(1, 20):
