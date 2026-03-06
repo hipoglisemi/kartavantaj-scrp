@@ -370,7 +370,7 @@ else:
     # Gemini — new google-genai SDK (replaces deprecated google-generativeai)
     from google import genai as _genai_sdk
 
-    _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 
     _gemini_keys: list = []
     for i in range(1, 20):
@@ -461,8 +461,12 @@ class AIParser:
             active_client = self._gemini_clients[self._gemini_key_index]
             response = call_with_timeout(
                 active_client.models.generate_content,
-                args=(_GEMINI_MODEL_NAME, prompt),
-                kwargs={"config": {"temperature": 0.1}},
+                args=(),
+                kwargs={
+                    "model": _GEMINI_MODEL_NAME, 
+                    "contents": prompt,
+                    "config": {"temperature": 0.1, "response_mime_type": "application/json"}
+                },
                 timeout_sec=timeout_sec,
             )
             return response.text.strip()
@@ -971,6 +975,8 @@ JSON olarak cevap ver:
     except Exception as e:
         print(f"API Parser Error: {e}")
         return {
+            "_ai_failed": True,
+            "short_title": title,
             "description": short_description,
             "reward_value": None,
             "reward_type": None,
@@ -979,5 +985,7 @@ JSON olarak cevap ver:
             "brands": [],
             "conditions": [],
             "cards": [],
-            "participation": "Detayları İnceleyin"
+            "participation": "Detayları İnceleyin",
+            "start_date": None,
+            "end_date": None
         }
