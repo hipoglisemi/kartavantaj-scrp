@@ -6,8 +6,8 @@ import { cleanCampaignText } from '../utils/textCleaner';
 
 
 // Smart Hybrid: Two models for optimal performance
-const FLASH_MODEL = 'gemini-2.0-flash';
-const THINKING_MODEL = 'gemini-2.0-flash'; // Standardized to Flash to avoid 404s while maintaining logic
+const FLASH_MODEL = 'gemini-2.5-flash-lite';
+const THINKING_MODEL = 'gemini-2.5-flash-lite'; // Standardized to Flash to avoid 404s while maintaining logic
 
 const CRITICAL_FIELDS = ['valid_until', 'eligible_customers', 'min_spend', 'category', 'bank', 'earning'];
 

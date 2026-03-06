@@ -343,143 +343,57 @@ BANK_RULES = {
 }
 
 # ── AI Provider Configuration ──────────────────────────────────────────────
-AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini").lower()  # "gemini" or "groq"
+from google import genai as _genai_sdk
 
-if AI_PROVIDER == "groq":
-    try:
-        from groq import Groq as _GroqClient
-    except ImportError:
-        raise ImportError("groq package not installed. Run: pip install groq")
+_GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+_gemini_key = os.getenv("GEMINI_API_KEY")
 
-    # Collect all keys: GROQ_API_KEY_1, _2, _3 … (or fallback to GROQ_API_KEY)
-    _groq_keys: list = []
-    for i in range(1, 20):  # support up to 19 keys
-        k = os.getenv(f"GROQ_API_KEY_{i}")
-        if k:
-            _groq_keys.append(k)
-    if not _groq_keys:
-        single = os.getenv("GROQ_API_KEY")
-        if not single:
-            raise ValueError("No GROQ_API_KEY found. Set GROQ_API_KEY or GROQ_API_KEY_1 ..")
-        _groq_keys = [single]
-
-    _groq_clients = [_GroqClient(api_key=k) for k in _groq_keys]
-    _gemini_models: list = []
-    print(f"[DEBUG] Groq key rotation: {len(_groq_keys)} key(s) loaded.")
-else:
-    # Gemini — new google-genai SDK (replaces deprecated google-generativeai)
-    from google import genai as _genai_sdk
-
-    _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
-
-    _gemini_keys: list = []
+if not _gemini_key:
+    # try fallback
     for i in range(1, 20):
         k = os.getenv(f"GEMINI_API_KEY_{i}")
         if k:
-            _gemini_keys.append(k)
-    if not _gemini_keys:
-        single = os.getenv("GEMINI_API_KEY")
-        if not single:
-            raise ValueError("No GEMINI_API_KEY found. Set GEMINI_API_KEY or GEMINI_API_KEY_1..7")
-        _gemini_keys = [single]
+            _gemini_key = k
+            break
 
-    # Create one Client per key — no global state, perfect for rotation
-    _gemini_clients: list = []
-    for _k in _gemini_keys:
-        try:
-            _gemini_clients.append(_genai_sdk.Client(api_key=_k))
-        except Exception as _e:
-            print(f"[WARN] Could not init Gemini client for a key: {_e}")
+if not _gemini_key:
+    raise ValueError("No GEMINI_API_KEY found. Set GEMINI_API_KEY in .env")
 
-    if not _gemini_clients:
-        raise ValueError("No Gemini clients could be initialised. Check your API keys.")
-
-    _groq_clients: list = []
-    print(f"[DEBUG] Gemini key rotation: {len(_gemini_clients)} key(s) loaded (model: {_GEMINI_MODEL_NAME}).")
+_gemini_client = _genai_sdk.Client(api_key=_gemini_key)
+print(f"[DEBUG] Gemini initialized (model: {_GEMINI_MODEL_NAME}).")
 # ────────────────────────────────────────────────────────────────────────────
 
 
 
 class AIParser:
     """
-    Gemini / Groq AI-powered campaign parser.
+    Gemini AI-powered campaign parser.
     Extracts structured data from unstructured campaign text.
-    Active provider is controlled by AI_PROVIDER env variable.
+    Uses exponential backoff for rate limits.
     """
 
     def __init__(self, model_name: str = None):
-        import random
-        
-        self._provider = AI_PROVIDER
-        if self._provider == "groq":
-            self._groq_clients = _groq_clients
-            # Start at a random key so parallel scrapers don't all hit Key 1 instantly
-            self._groq_key_index = random.randint(0, max(0, len(_groq_clients) - 1)) if _groq_clients else 0
-            self._groq_model = "llama-3.3-70b-versatile"
-            self._gemini_clients: list = []
-            self._gemini_key_index = 0
-            self.model = None
-            print(f"[DEBUG] AIParser using Groq ({self._groq_model}) — {len(_groq_clients)} key(s)")
-        else:
-            self._gemini_clients = _gemini_clients
-            self._gemini_key_index = 0
-            self._groq_clients = []
-            self._groq_key_index = 0
-            self.model = None  # no longer used — calls go via client
-            print(f"[DEBUG] AIParser using Gemini — {len(self._gemini_clients)} key(s) | model: {_GEMINI_MODEL_NAME}")
-
-    def _rotate_groq_key(self) -> bool:
-        """Continuously switch to next Groq key in an infinite loop."""
-        if not self._groq_clients:
-            return False
-        # Circular rotation to evenly distribute Token limits infinitely
-        self._groq_key_index = (self._groq_key_index + 1) % len(self._groq_clients)
-        return True
-
-    def _rotate_gemini_key(self) -> bool:
-        """Switch to next Gemini key. Returns True if a new key is available."""
-        if self._gemini_key_index + 1 < len(self._gemini_clients):
-            self._gemini_key_index += 1
-            print(f"   🔄 Gemini key rotated → key #{self._gemini_key_index + 1}/{len(self._gemini_clients)}")
-            return True
-        print(f"   ❌ All {len(self._gemini_clients)} Gemini key(s) exhausted for today.")
-        return False
+        self._client = _gemini_client
+        self.model = None
+        print(f"[DEBUG] AIParser using Gemini | model: {_GEMINI_MODEL_NAME}")
 
     # ── Unified call helper ──────────────────────────────────────────────────
     def _call_ai(self, prompt: str, timeout_sec: int = 65) -> str:
-        """Send prompt to active AI provider. Rotation happens in the retry loop."""
+        """Send prompt to active AI provider."""
         import time
-        
-        if self._provider == "groq":
-            time.sleep(2)  # Groq has a 30 RPM limit (~2 seconds is perfectly safe for 30 requests/min)
-            # Force rotation on every single call to distribute Token limits (12k TPM) across all 10 keys
-            # By doing this, 10 consecutive requests will use 10 different API keys
-            self._rotate_groq_key()
-            
-            client = self._groq_clients[self._groq_key_index]
-            completion = client.chat.completions.create(
-                model=self._groq_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=2048,
-                timeout=timeout_sec,
-            )
-            return completion.choices[0].message.content.strip()
-        else:
-            time.sleep(4.5)  # Enforce ~13 RPM to respect Gemini's 15 RPM free-tier limit
-            # google-genai SDK: client.models.generate_content()
-            active_client = self._gemini_clients[self._gemini_key_index]
-            response = call_with_timeout(
-                active_client.models.generate_content,
-                args=(),
-                kwargs={
-                    "model": _GEMINI_MODEL_NAME, 
-                    "contents": prompt,
-                    "config": {"temperature": 0.1, "response_mime_type": "application/json"}
-                },
-                timeout_sec=timeout_sec,
-            )
-            return response.text.strip()
+        # Small intentional delay to ensure we do not violently hit 1000 RPM instantly across parallel workers
+        time.sleep(0.5) 
+        response = call_with_timeout(
+            self._client.models.generate_content,
+            args=(),
+            kwargs={
+                "model": _GEMINI_MODEL_NAME, 
+                "contents": prompt,
+                "config": {"temperature": 0.1, "response_mime_type": "application/json"}
+            },
+            timeout_sec=timeout_sec,
+        )
+        return response.text.strip()
     # ────────────────────────────────────────────────────────────────────────
         
     def parse_campaign_data(
@@ -526,21 +440,10 @@ class AIParser:
 
             except Exception as e:
                 error_str = str(e)
-                if "429" in error_str or "Resource exhausted" in error_str or "rate_limit" in error_str.lower():
-                    # 1. Try rotating to next key first (instant — no wait)
-                    rotated = False
-                    if self._provider == "groq":
-                        rotated = self._rotate_groq_key()
-                    else:
-                        rotated = self._rotate_gemini_key()
-
-                    if rotated:
-                        print(f"   🔄 Switched to next key, retrying immediately...")
-                        continue  # retry immediately with new key
-
-                    # 2. No more keys — wait and retry
-                    wait_time = (attempt + 1) * 15  # 15s, 30s, 45s, 60s, 75s
-                    print(f"   ⚠️ All keys rate-limited. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries})")
+                if "429" in error_str or "Resource exhausted" in error_str or "rate_limit" in error_str.lower() or "503" in error_str:
+                    # Exponential backoff for typical API failures / server congestion
+                    wait_time = (attempt + 1) * 3 
+                    print(f"   ⚠️ API limit or 503 error. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries}) | {error_str[:100]}")
                     import time
                     time.sleep(wait_time)
                     continue
@@ -556,6 +459,7 @@ class AIParser:
         Clean and normalize text before sending to AI.
 
         Strategy (token optimization):
+        0. Remove noisy HTML elements (script, style, footer) if text is raw HTML
         1. Split into lines and drop boilerplate lines:
            - Very short lines (< 40 chars) → likely nav links, breadcrumbs, footer items
            - Lines that look like pure navigation / copyright noise
@@ -566,6 +470,19 @@ class AIParser:
         """
         if not text:
             return ""
+
+        # ── Step 0: HTML parsing and decomposing ─────────────────────
+        try:
+            from bs4 import BeautifulSoup
+            # Parse as HTML (if it's plain text, soup will just return it safely)
+            soup = BeautifulSoup(text, 'html.parser')
+            unwanted_tags = ['script', 'style', 'footer', 'nav', 'header', 'noscript', 'meta', 'iframe', 'svg', 'button']
+            for tag in soup(unwanted_tags):
+                tag.decompose()
+            # Extract clean text, separating blocks with newlines
+            text = soup.get_text(separator='\n', strip=True)
+        except Exception as e:
+            print(f"[WARN] BeautifulSoup parsing failed in _clean_text: {e}")
 
         # ── Step 1: line-level boilerplate filter ────────────────────────────
         # Common Turkish nav/footer noise patterns  (case-insensitive check)

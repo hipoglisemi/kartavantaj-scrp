@@ -32,7 +32,7 @@ export async function classifySectorWithAI(
     snippet: string,
     geminiApiKey: string
 ): Promise<{ sector_slug: string, confidence: number }> {
-    const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+    const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
 
     const prompt = `Classify this Turkish credit card campaign into EXACTLY ONE sector slug.
     

@@ -2,7 +2,7 @@
 import { supabase } from './supabase';
 
 const GEMINI_API_KEY = process.env.GOOGLE_GEMINI_KEY!;
-const MODEL_NAME = 'gemini-2.0-flash';
+const MODEL_NAME = 'gemini-2.5-flash-lite';
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=${GEMINI_API_KEY}`;
 
 interface MasterData {

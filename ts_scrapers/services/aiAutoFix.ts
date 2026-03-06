@@ -61,7 +61,7 @@ async function callGeminiAPI(prompt: string, retryCount: number = 0): Promise<an
 
     try {
         const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_API_KEY}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -513,7 +513,7 @@ export async function saveAiFixResult(
         ai_confidence: result.confidence,
         ai_notes: result.notes,
         ai_status: status,
-        ai_model: 'gemini-2.0-flash'
+        ai_model: 'gemini-2.5-flash-lite'
     };
 
     if (status === 'auto_applied') {
