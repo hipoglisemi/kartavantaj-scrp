@@ -429,13 +429,12 @@ class AIParser:
             print(f"[DEBUG] AIParser using Gemini — {len(self._gemini_clients)} key(s) | model: {_GEMINI_MODEL_NAME}")
 
     def _rotate_groq_key(self) -> bool:
-        """Switch to next Groq key. Returns True if a new key is available."""
-        if self._groq_key_index + 1 < len(self._groq_clients):
-            self._groq_key_index += 1
-            print(f"   🔄 Groq key rotated → key #{self._groq_key_index + 1}/{len(self._groq_clients)}")
-            return True
-        print(f"   ❌ All {len(self._groq_clients)} Groq key(s) exhausted for today.")
-        return False
+        """Continuously switch to next Groq key in an infinite loop."""
+        if not self._groq_clients:
+            return False
+        # Circular rotation to evenly distribute Token limits infinitely
+        self._groq_key_index = (self._groq_key_index + 1) % len(self._groq_clients)
+        return True
 
     def _rotate_gemini_key(self) -> bool:
         """Switch to next Gemini key. Returns True if a new key is available."""
