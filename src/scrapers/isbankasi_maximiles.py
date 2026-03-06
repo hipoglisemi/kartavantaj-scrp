@@ -265,12 +265,27 @@ class IsbankMaximilesScraper:
             if limit and count >= limit:
                 break
 
-            # ── Yeni ekleme: Expired bölümüne girdik mi? ──────────────
-            page_text_lower = soup.get_text(separator=" ", strip=True).lower()
-            if any(m in page_text_lower for m in EXPIRED_MARKERS):
-                print(f"   🛑 'Kampanya sona ermiştir' detected on page — stopping scroll to avoid expired campaigns.")
-                break
+            # ── Yeni ekleme: Son eklenen kampanyalar expired bölgesine girdi mi? ──
+            try:
+                # Check the most recently loaded cards (last 10-15)
+                campaign_items = soup.find_all("a", href=lambda href: href and "/kampanyalar/" in href)
+                if len(campaign_items) > 10:
+                    recent = campaign_items[-10:]
+                    expired_count = 0
+                    for a in recent:
+                         parent = a.find_parent("div", class_="campaign-item") or a.find_parent("div", class_="col-xl-4") or a.find_parent("div", class_="card") or a.parent
+                         parent_text = parent.get_text(separator=" ", strip=True).lower() if parent else ""
+                         if any(m in parent_text for m in EXPIRED_MARKERS):
+                             expired_count += 1
+                    
+                    if expired_count >= 3:
+                         print(f"   🛑 Reached expired campaigns section ({expired_count}/10 expired). Stopping scroll.")
+                         break
+            except Exception as e:
+                pass
             # ─────────────────────────────────────────────────────────
+
+
 
             # Try load more button
             btn = self.page.query_selector("button:has-text('Daha Fazla'), a.CampAllShow")
@@ -345,19 +360,10 @@ class IsbankMaximilesScraper:
                 if not is_exact_category and not is_category_suffix and not is_common_page and len(href) > 25:
                     full_url = urljoin(self.BASE_URL, a["href"])
                     
-                    # Sona ermiş kampanya tespiti — tüm ata elementleri tara
-                    # (class adına bağlı kalmak yerine DOM'un tamamına bak)
-                    expired = False
-                    for ancestor in a.parents:
-                        ancestor_text = ancestor.get_text(separator=" ", strip=True).lower()
-                        if any(m in ancestor_text for m in EXPIRED_MARKERS):
-                            expired = True
-                            break
-                        # Kök elemente ulaştık, daha yukarı gitmeye gerek yok
-                        if ancestor.name in ("body", "html"):
-                            break
-                        
-                    if expired:
+                    parent = a.find_parent("div", class_="campaign-item") or a.find_parent("div", class_="col-xl-4") or a.find_parent("div", class_="card") or a.parent
+                    parent_text = parent.get_text(separator=" ", strip=True).lower() if parent else ""
+
+                    if "gecmis" in href or "geçmiş" in a.text.lower() or any(m in parent_text for m in EXPIRED_MARKERS):
                         expired_links.append(full_url)
                     else:
                         all_links.append(full_url)

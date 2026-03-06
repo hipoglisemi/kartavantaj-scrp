@@ -574,15 +574,7 @@ class IsbankMaximumScraper:
 
     def run(self, limit: Optional[int] = None):
         """Main execution flow"""
-        global AIParser
-        if AIParser is None:
-            try:
-                from src.services.ai_parser import AIParser
-                print("[DEBUG] AIParser lazy-imported via src.services")
-            except ImportError:
-                print("[DEBUG] Absolute import failed, trying relative")
-                from services.ai_parser import AIParser
-        
+
         bank_id = self._get_or_create_bank()
         card_id = self._get_or_create_card(bank_id)
 
@@ -639,7 +631,7 @@ class IsbankMaximumScraper:
                         continue
                         
                     try:
-                        ai_data = AIParser.parse_campaign_data(
+                        ai_data = self.parser.parse_campaign_data(
                             raw_text=res_data["raw_text"],
                             title=res_data["title"],
                             bank_name=self.BANK_NAME,
