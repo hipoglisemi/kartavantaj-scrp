@@ -306,9 +306,9 @@ class DunyaKatilimScraper:
             return "error"
 
     def _load_cache(self):
-        bank = self.db.query(Bank).filter(Bank.slug == "dunyakatilim").first()
+        bank = self.db.query(Bank).filter(Bank.slug == "dunya-katilim").first()
         if not bank:
-            bank = Bank(name="Dünya Katılım", slug="dunyakatilim", is_active=True)
+            bank = Bank(name="Dünya Katılım", slug="dunya-katilim", is_active=True)
             self.db.add(bank)
             self.db.commit()
         self.bank_cache = bank
