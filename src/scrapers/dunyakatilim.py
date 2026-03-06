@@ -325,7 +325,11 @@ class DunyaKatilimScraper:
         if key in self.card_cache:
             return self.card_cache[key]
         
-        slug_val = name.lower().replace(" ", "-")
+        text_for_slug = name.lower()
+        text_for_slug = text_for_slug.replace("ı", "i").replace("ğ", "g").replace("ü", "u").replace("ş", "s").replace("ö", "o").replace("ç", "c")
+        slug_val = re.sub(r'[^a-z0-9-]', '-', text_for_slug)
+        slug_val = re.sub(r'-+', '-', slug_val).strip('-')
+        
         card = self.db.query(Card).filter(Card.bank_id == self.bank_cache.id, Card.slug == slug_val).first()
         if not card:
             card = Card(bank_id=self.bank_cache.id, name=name, slug=slug_val, is_active=True)
