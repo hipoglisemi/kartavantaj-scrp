@@ -6,9 +6,9 @@ import uuid
 import traceback
 from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
+import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from playwright.sync_api import sync_playwright
 
 # Path setup
 current_dir = os.path.dirname(os.path.abspath("/Users/hipoglisemi/Desktop/kartavantaj-scraper/src/scrapers/kuveytturk.py"))  # src/scrapers
@@ -115,9 +115,12 @@ class KuveytTurkScraper:
         self.engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
         Session = sessionmaker(bind=self.engine)
         self.session = Session()
-        self.playwright = None
-        self.browser = None
-        self.page = None
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Referer": "https://saglamkart.kuveytturk.com.tr/"
+        }
         
         try:
             from src.services.ai_parser import AIParser as _AIParser
@@ -156,49 +159,11 @@ class KuveytTurkScraper:
             self.session.commit()
         return card.id
 
-    def _start_browser(self):
-        self.playwright = sync_playwright().start()
-        is_ci = os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true"
-        connected = False
-        
-        if not is_ci:
-            try:
-                print("   🔌 Attempting to connect to local Chrome debug instance...")
-                self.browser = self.playwright.chromium.connect_over_cdp("http://localhost:9222")
-                if len(self.browser.contexts) > 0:
-                    context = self.browser.contexts[0]
-                else:
-                    context = self.browser.new_context()
-                connected = True
-                print("   ✅ Connected to local Chrome instance")
-            except Exception as e:
-                print(f"   ⚠️ Could not connect to debug Chrome: {e}. Falling back to launch...")
-        
-        if not connected:
-            self.browser = self.playwright.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox",
-                      "--disable-dev-shm-usage", "--disable-gpu", "--window-size=1920,1080",
-                      "--disable-blink-features=AutomationControlled",
-                      "--disable-extensions", "--disable-web-security"]
-            )
-            context = self.browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                locale="tr-TR",
-                timezone_id="Europe/Istanbul",
-                extra_http_headers={"Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"}
-            )
-        
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        self.page = context.new_page()
-        self.page.set_default_timeout(60000)
-
-    def _stop_browser(self):
-        try:
-            if self.browser: self.browser.close()
-            if self.playwright: self.playwright.stop()
-        except Exception: pass
+    def _clean(self, text: str) -> str:
+        if not text: return ""
+        text = str(text).replace('\xa0', ' ').replace('\r', '')
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
 
     def _fetch_campaign_urls(self, limit: Optional[int] = None) -> tuple[List[str], List[str]]:
         print(f"📥 Fetching campaign list from {self.CAMPAIGNS_URL}...")
@@ -206,69 +171,39 @@ class KuveytTurkScraper:
         expired_links = set()
 
         try:
-            print("   Opening page with Playwright...")
-            self.page.goto(self.CAMPAIGNS_URL, wait_until="domcontentloaded")
+            # Kuveyt Türk standard SSR response
+            response = requests.get(self.CAMPAIGNS_URL, headers=self.headers, verify=False, timeout=20)
+            response.raise_for_status()
             
-            # Close any cookie popups if present
-            try:
-                cookie_btn = self.page.locator("a.cc-btn.cc-allow, button.cookie-accept, #cookie-accept")
-                if cookie_btn.count() > 0 and cookie_btn.first.is_visible():
-                    cookie_btn.first.click()
-                    time.sleep(1)
-            except Exception:
-                pass
-
-            print("   Attempting to uncover all campaigns by clicking 'Daha Fazla Göster'...")
-            click_count = 0
-            max_clicks = 20
+            soup = BeautifulSoup(response.text, "html.parser")
             
-            while click_count < max_clicks:
-                try:
-                    # Find the load more button
-                    more_btn = self.page.locator(".show-more, a:has-text('Daha Fazla Göster')").first
-                    if more_btn.is_visible():
-                        more_btn.scroll_into_view_if_needed()
-                        more_btn.click()
-                        click_count += 1
-                        print(f"   [{click_count}] Clicked load more...")
-                        time.sleep(2.5) # Wait for elements to load
-                    else:
-                        break
-                except Exception as e:
-                    print(f"   ⚠️ Could not click load more: {e}")
-                    break
-
-            print(f"   Finished pagination. Clicked {click_count} times.")
-            html_content = self.page.content()
-            
-            # Parse HTML to find links
-            soup = BeautifulSoup(html_content, "html.parser")
+            # Find campaign links - typical structure is in .box-content or similar
             campaign_items = soup.select(".box-content a, .campaign-list-item a, a.campaign-item")
             
             if not campaign_items:
-                # Fallback generic search if specific classes fail
-                campaign_items = soup.find_all("a", href=re.compile(r'/kampanyalar/.+-\d+'))
+                # Fallback: find all links containing /kampanyalar/
+                campaign_items = soup.find_all("a", href=re.compile(r'/kampanyalar/'))
 
             for a in campaign_items:
                 href = a.get("href")
-                if not href or href == "javascript:;" or "#" in href:
-                    continue
-                if "/arsiv" in href.lower() or "/gecmis" in href.lower():
+                if not href or any(x in href.lower() for x in ["javascript", "#", "/arsiv", "/gecmis"]):
                     continue
                 
                 full_url = urljoin(self.BASE_URL, href)
                 
-                # Assuming we only have active ones on main page, we can inspect text
+                # Check for "expired" indicators in parent text
                 parent = a.find_parent()
                 parent_text = parent.get_text() if parent else ""
-                if "sona erdi" in parent_text.lower() or "bitmiştir" in parent_text.lower():
+                if any(x in parent_text.lower() for x in ["sona erdi", "bitmiştir", "geçmiş"]):
                     expired_links.add(full_url)
                 else:
                     all_campaign_links.add(full_url)
                     
+            # Handle additional campaigns that might be under "Daha Fazla Göster" 
+            # Note: For now we fetch the main list, usually sufficient for daily sync.
+                    
         except Exception as e:
-            traceback.print_exc()
-            print(f"   ❌ Playwright failed: {e}")
+            print(f"   ❌ Fetch failed: {e}")
             return [], []
 
         unique_urls = list(all_campaign_links)
@@ -282,66 +217,52 @@ class KuveytTurkScraper:
 
     def _extract_campaign_data(self, url: str) -> Optional[Dict[str, Any]]:
         try:
-            self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(1)
-            html_content = self.page.content()
+            response = requests.get(url, headers=self.headers, verify=False, timeout=20)
+            response.raise_for_status()
+            
+            html_content = response.text
             soup = BeautifulSoup(html_content, "html.parser")
             
-            # Title
-            title_el = soup.select_one("h1, .campaign-title, .title h2")
+            # Title extraction - improved selector
+            title_el = soup.select_one("h1, .campaign-title, .title h2, .subpage-header h1")
             title = self._clean(title_el.text) if title_el else "Başlık Yok"
             
-            if "gecmis" in url or "geçmiş" in title.lower():
+            if any(x in url.lower() or x in title.lower() for x in ["gecmis", "geçmiş", "arsiv"]):
                 return None
 
-            page_text = soup.get_text()
-            if "Aradığınız sayfa bulunamadı" in page_text or "404" in page_text:
-                return None
-
-            # End Date extraction
-            date_text = ""
-            date_el = soup.select_one(".date, .campaign-date, .date-info, li:-soup-contains('Tarihleri Arasında')")
-            if date_el:
-                date_text = self._clean(date_el.text)
+            # Main content area
+            content_div = soup.select_one(".search-content, .subpage-wrapper .container, .ck-content, .campaign-detail-content, .content-area")
             
-            # Extract end date using regex from text if explicit element not found
-            if not date_text:
-                date_match = re.search(r'Kampanya Tarihi\s*:\s*(.+)', page_text)
-                if date_match:
-                    date_text = self._clean(date_match.group(1))
-
-            # Full description
-            full_text = ""
-            desc_area = soup.select_one(".search-content, .subpage-wrapper .container, .ck-content, .campaign-detail-content")
-            if desc_area:
-                for br in desc_area.find_all("br"):
-                    br.replace_with("\n")
-                lines = [self._clean(p.text) for p in desc_area.find_all(['p', 'li', 'div'])]
-                if not lines:
-                    lines = desc_area.text.split("\n")
+            # Clean unwanted elements
+            for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+                tag.extract()
                 
-                full_text = "\n".join([l for l in lines if len(l) > 0])
-            else:
-                full_text = self._clean(soup.find("body").text)[:4000]
-
-            # Image
+            raw_text = soup.get_text(separator="\n", strip=True)
+            
+            # Image URL processing
             image_url = None
-            img_el = soup.select_one(".campaign-detail img, .detail-image img, .cover img")
+            img_el = soup.select_one(".campaign-detail img, .detail-image img, .cover img, .campaign-banner img")
             if img_el:
                 src = img_el.get("src") or img_el.get("data-src")
                 if src and not src.startswith("data:"):
                     image_url = urljoin(self.BASE_URL, src)
+            
+            # Date detection in HTML to assist AI
+            date_match = re.search(r'(\d{2}\.\d{2}\.\d{4}\s*[-–]\s*\d{2}\.\d{2}\.\d{4})', html_content)
+            date_info = ""
+            if date_match:
+                date_info = f"\n\nKAMPANYA TARIHI (KESIN): {date_match.group(1)}\n"
 
             return {
                 "title": title,
                 "image_url": image_url,
-                "date_text": date_text,
-                "full_text": full_text[:4000],
+                "date_text": date_info,
+                "full_text": raw_text[:4000],
                 "source_url": url,
-                "raw_text": full_text
+                "raw_text": raw_text + date_info
             }
         except Exception as e:
-            print(f"   ⚠️ Error extracting {url}: {e}")
+            print(f"   ⚠️ Error extracting {url} via requests: {e}")
             return None
 
     def _parse_date(self, date_text: str, is_end: bool = False) -> Optional[str]:
@@ -499,7 +420,6 @@ class KuveytTurkScraper:
         stats = {'total': 0, 'new': 0, 'updated': 0, 'failed': 0}
         
         try:
-            self._start_browser()
             bank_id = self._get_or_create_bank()
             card_id = self._get_or_create_card(bank_id)
             
@@ -566,7 +486,7 @@ class KuveytTurkScraper:
                 error_details={"error": str(e)}
             )
         finally:
-            self._stop_browser()
+            self.session.close()
 
 if __name__ == "__main__":
     limit_arg = None
