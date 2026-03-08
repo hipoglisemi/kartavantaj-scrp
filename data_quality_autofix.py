@@ -154,7 +154,7 @@ def run_autofix():
             reasons = ", ".join(reasons_list)
             
             with get_db_session() as db:
-                c = db.query(Campaign).get(c_id)
+                c = db.get(Campaign, c_id)
                 if not c:
                     print(f"\n🛠️ Skipping: [{c_id}] (Campaign no longer in DB)")
                     continue
