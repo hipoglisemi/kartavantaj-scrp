@@ -182,10 +182,20 @@ class AlbarakaScraper:
                 "searchUrl": "/tr/arama"
             }
             try:
-                response = requests.post(self.API_URL, data=data, headers=self.headers, verify=False, timeout=15)
-                response.raise_for_status()
-                res_json = response.json()
-                
+                # Add retry logic for API stability
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.post(self.API_URL, data=data, headers=self.headers, verify=False, timeout=20)
+                        response.raise_for_status()
+                        res_json = response.json()
+                        break
+                    except Exception as api_err:
+                        if attempt == max_retries - 1:
+                            raise api_err
+                        print(f"   ⚠️ API attempt {attempt+1} failed, retrying in 3s... ({api_err})")
+                        time.sleep(3)
+
                 campaigns_list = res_json.get("Data", {}).get("Campaigns", [])
                 if total_count is None:
                     total_count = res_json.get("Data", {}).get("TotalCount", 0)
@@ -200,10 +210,10 @@ class AlbarakaScraper:
                     break
                     
                 page_index += 1
-                time.sleep(1) # Small delay between API calls
+                time.sleep(1.5) # Consistent delay
                 
             except Exception as e:
-                print(f"   ❌ Failed to fetch campaign list on page {page_index}: {e}")
+                print(f"   ❌ Failed to fetch campaign list on page {page_index} after retries: {e}")
                 break
                 
         # Filter out expired campaigns based on title or content if obvious, but usually Albaraka removes them
@@ -236,31 +246,41 @@ class AlbarakaScraper:
         return active_campaigns
 
     def _extract_campaign_details(self, url: str) -> Optional[str]:
+        """Extract campaign details using requests (SSR content found in raw HTML)"""
         try:
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            response = requests.get(url, headers=self.headers, verify=False, timeout=15)
+            # Increase timeout and stay with requests for stability
+            response = requests.get(url, headers=self.headers, verify=False, timeout=20)
             response.raise_for_status()
             
-            soup = BeautifulSoup(response.text, "html.parser")
+            html_content = response.text
+            soup = BeautifulSoup(html_content, "html.parser")
             
-            # The campaign content is usually inside a container like .detail-content or .text-content
-            # We'll extract main content blocks
-            content_div = soup.select_one(".detail-content, .campaign-detail, .content-wrapper, main")
+            # Remove scripts, styles, and navigational elements
+            for s in soup(["script", "style", "nav", "footer", "header", "noscript"]):
+                s.extract()
             
-            if content_div:
-                # Remove scripts and styles
-                for s in content_div(["script", "style"]):
-                    s.extract()
-                return self._clean(content_div.get_text(separator="\n"))
-            else:
-                for s in soup(["script", "style", "nav", "footer", "header"]):
-                    s.extract()
-                return self._clean(soup.get_text(separator="\n"))[:3000]
+            # Extract text from the main container or the whole body
+            # We found that Albaraka content is in the SSR even if JS moves it later
+            main_text = soup.get_text(separator="\n", strip=True)
+            
+            # AI Helper: If we see "Katılım Adımları", make it more obvious
+            if "Katılım Adımları" in main_text:
+                main_text = main_text.replace("Katılım Adımları", "\n\n### KAMPANYAYA KATILIM ADIMLARI:\n")
+            
+            # Helper to find date in raw HTML via regex to aid AI
+            # Looking for DD.MM.YYYY - DD.MM.YYYY
+            date_match = re.search(r'(\d{2}\.\d{2}\.\d{4}\s*[-–]\s*\d{2}\.\d{2}\.\d{4})', html_content)
+            date_info = ""
+            if date_match:
+                date_info = f"\n\nKAMPANYA TARIHI (KESIN): {date_match.group(1)}\n"
+            
+            return self._clean(main_text) + date_info
 
         except Exception as e:
-            print(f"   ⚠️ Error extracting details from {url}: {e}")
+            print(f"   ⚠️ Error extracting details from {url} via requests: {e}")
             return None
 
     def _parse_date(self, date_text: str, is_end: bool = False) -> Optional[str]:
