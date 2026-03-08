@@ -90,7 +90,7 @@ def run_autofix():
             ).all()
             print(f"   📊 Checking {len(defective_campaigns)} active campaigns for defects.")
             
-            to_fix = []
+            to_fix_ids = []
             for c in defective_campaigns:
                 is_defective = False
                 reasons = []
@@ -138,21 +138,20 @@ def run_autofix():
                     reasons.append("Missing Brands")
 
                 if is_defective and c.tracking_url:
-                    to_fix.append({"campaign": c, "reasons": reasons})
+                    to_fix_ids.append((c.id, c.tracking_url, reasons))
             
-            print(f"⚠️ Found {len(to_fix)} defective campaigns requiring repair.")
+            print(f"⚠️ Found {len(to_fix_ids)} defective campaigns requiring repair.")
             
-            if not to_fix:
+            if not to_fix_ids:
                 print("✅ All active campaigns look healthy! Exiting.")
                 return
                 
-            fixed_count = 0
+        fixed_count = 0
             
-            for item in to_fix:
-                c_id = item["campaign"].id
-                reasons = ", ".join(item["reasons"])
-                
-                # Re-fetch campaign to avoid ObjectDeletedError or DetachedInstanceError across rollbacks
+        for c_id, tracking_url, reasons_list in to_fix_ids:
+            reasons = ", ".join(reasons_list)
+            
+            with get_db_session() as db:
                 c = db.query(Campaign).get(c_id)
                 if not c:
                     print(f"\n🛠️ Skipping: [{c_id}] (Campaign no longer in DB)")
@@ -306,10 +305,10 @@ def run_autofix():
                 else:
                     print(f"   ⚠️ AI didn't find the missing data. No changes made.")
 
-                # Be gentle to the API limits
-                time.sleep(2)
-                
-            print(f"\n🏁 Auto-fixer complete. Successfully repaired {fixed_count}/{len(to_fix)} campaigns.")
+            # Be gentle to the API limits
+            time.sleep(2)
+            
+        print(f"\n🏁 Auto-fixer complete. Successfully repaired {fixed_count}/{len(to_fix_ids)} campaigns.")
             
     except Exception as e:
         print(f"\n📛 CRITICAL ERROR during auto-fix: {e}")
