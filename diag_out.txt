@@ -1,0 +1,13 @@
+Script started...
+Imports successful
+Session created
+Total found: 656
+Candidates loaded: 656
+Results summary:
+  Defective: 4
+  With URL: 4
+  No URL: 0
+  Missing Desc: 0
+  Missing Reward: 0
+  Sector Diger: 1
+  Missing Brands: 4
