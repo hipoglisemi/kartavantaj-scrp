@@ -18,6 +18,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import re
 import uuid
+import logging
+
+# Suppress noisy INFO logs from underlying AI libraries
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("google_genai.models").setLevel(logging.WARNING)
+
 from src.models import Campaign, Sector, Brand, CampaignBrand
 from src.database import get_db_session
 from src.services.ai_parser import parse_campaign_data, AIParser
