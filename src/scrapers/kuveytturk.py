@@ -66,8 +66,11 @@ class KuveytTurkScraper:
             card_id = self._get_or_create_card("Sağlam Kart").id
             
             async with async_playwright() as p:
-                # Using Webkit as it proved reliable on this environment
-                browser = await p.webkit.launch(headless=self.headless)
+                # Using Chromium (compatible with both local and CI environments)
+                browser = await p.chromium.launch(
+                    headless=self.headless,
+                    args=["--no-sandbox", "--disable-dev-shm-usage"]
+                )
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     viewport={'width': 1280, 'height': 800}
