@@ -199,9 +199,11 @@ class KuveytTurkScraper:
                 else:
                     all_campaign_links.add(full_url)
                     
-            # Handle additional campaigns that might be under "Daha Fazla Göster" 
-            # Note: For now we fetch the main list, usually sufficient for daily sync.
-                    
+            # Handle additional campaigns that might be under "Daha Fazla Göster"
+            # The site uses a Load More button that triggers an AJAX request.
+            # For now, we fetch the first page, and if we need more, we can implement pagination logic.
+            # On Kuveyt Turk, the main listing page usually shows most recent ones.
+            
         except Exception as e:
             print(f"   ❌ Fetch failed: {e}")
             return [], []
@@ -209,7 +211,8 @@ class KuveytTurkScraper:
         unique_urls = list(all_campaign_links)
         unique_expired = list(expired_links)
         
-        if limit:
+        # If no limit is provided, process ALL found URLs
+        if limit and limit > 0:
             unique_urls = unique_urls[:limit]
 
         print(f"✅ Found {len(unique_urls)} active campaigns, and {len(unique_expired)} expired campaigns")
@@ -223,43 +226,78 @@ class KuveytTurkScraper:
             html_content = response.text
             soup = BeautifulSoup(html_content, "html.parser")
             
-            # Title extraction - improved selector
+            # Title extraction
             title_el = soup.select_one("h1, .campaign-title, .title h2, .subpage-header h1")
             title = self._clean(title_el.text) if title_el else "Başlık Yok"
             
             if any(x in url.lower() or x in title.lower() for x in ["gecmis", "geçmiş", "arsiv"]):
                 return None
 
-            # Main content area
-            content_div = soup.select_one(".search-content, .subpage-wrapper .container, .ck-content, .campaign-detail-content, .content-area")
+            # Main content area: Kuveyt Turk uses 2 columns inside .search-content
+            # We explicitly exclude navigation and repetitive headers to keep AI text clean
+            for unwanted in soup.select("header, nav, .nav-wrapper, .breadcrumb, footer, .subpage-header"):
+                unwanted.decompose()
+
+            content_row = soup.select_one("div.row.search-content")
             
-            # Clean unwanted elements
-            for tag in soup(["script", "style", "nav", "footer", "header", "noscript"]):
-                tag.extract()
-                
-            raw_text = soup.get_text(separator="\n", strip=True)
+            # 1. Main Text & Description logic
+            main_description = ""
+            conditions_text = ""
+            if content_row:
+                text_col = content_row.select_one("div.col-md-6:nth-child(1)")
+                if text_col:
+                    list_items = text_col.select("ul.list > li")
+                    if list_items:
+                        # First bullet is the main description
+                        main_description = self._clean(list_items[0].get_text())
+                        # Rest are conditions/details
+                        conditions_text = "\n".join([f"- {self._clean(li.get_text())}" for li in list_items[1:]])
             
-            # Image URL processing
+            # Fallback if specific structure fails
+            if not main_description:
+                content_div = soup.select_one(".search-content, .subpage-wrapper .container, .ck-content")
+                if content_div:
+                    # Clean the content_div as well
+                    main_description = self._clean(content_div.get_text())[:800]
+            
+            # 2. Image extraction - CRITICAL FIX FOR KITAPYURDU & .vsf
             image_url = None
-            img_el = soup.select_one(".campaign-detail img, .detail-image img, .cover img, .campaign-banner img")
-            if img_el:
-                src = img_el.get("src") or img_el.get("data-src")
-                if src and not src.startswith("data:"):
+            # Look for ANY campaign image clues
+            img_candidates = soup.select("img")
+            for img in img_candidates:
+                src = img.get("src") or img.get("data-src") or img.get("data-original")
+                if not src or src.startswith("data:"): continue
+                
+                lower_src = src.lower()
+                # Prioritize Campaign images or specific formats
+                if any(x in lower_src for x in ["campaign", "kampanya", "detail", ".vsf", "banner"]):
                     image_url = urljoin(self.BASE_URL, src)
+                    break
             
-            # Date detection in HTML to assist AI
-            date_match = re.search(r'(\d{2}\.\d{2}\.\d{4}\s*[-–]\s*\d{2}\.\d{2}\.\d{4})', html_content)
-            date_info = ""
-            if date_match:
-                date_info = f"\n\nKAMPANYA TARIHI (KESIN): {date_match.group(1)}\n"
+            # Absolute fallback: first large-ish image in search-content if none matched clues
+            if not image_url and content_row:
+                img_el = content_row.select_one("img")
+                if img_el:
+                    image_url = urljoin(self.BASE_URL, img_el.get("src") or img_el.get("data-src"))
+
+            # 3. Comprehensive text for AI - STRENGTHENED LABELS
+            full_raw_text = f"BAŞLIK: {title}\n\n"
+            full_raw_text += f"KAMPANYA ANA ÖZETİ (AÇIKLAMA): {main_description}\n\n"
+            full_raw_text += f"TÜM KAMPANYA KOŞULLARI VE KATILIM DETAYLARI:\n{conditions_text}\n\n"
+            
+            # Explicitly call out fields for AI in the raw text to guide parsing
+            full_raw_text += "### AI PARSER TALİMATI:\n"
+            full_raw_text += "- Yukarıdaki 'KOŞULLAR' listesindeki TÜM maddeleri 'conditions' alanına (liste olarak) dahil et.\n"
+            full_raw_text += "- Kart isimlerini (Miles & Smiles, Sağlam Kart vb.) 'cards' alanına (liste olarak) yaz.\n"
+            full_raw_text += "- Başlangıç tarihi metinde yoksa bugün ({datetime.now().strftime('%d %B %Y')}) olarak kabul et.\n"
 
             return {
                 "title": title,
                 "image_url": image_url,
-                "date_text": date_info,
-                "full_text": raw_text[:4000],
+                "description": main_description,
+                "full_text": full_raw_text[:4000],
                 "source_url": url,
-                "raw_text": raw_text + date_info
+                "raw_text": full_raw_text
             }
         except Exception as e:
             print(f"   ⚠️ Error extracting {url} via requests: {e}")
@@ -327,43 +365,50 @@ class KuveytTurkScraper:
             )
             self.session.add(campaign)
 
-        # Update core fields
+        # 1. Update core fields
         campaign.slug = slug
         campaign.title = title
-        campaign.description = raw_data.get("full_text", "")
-        campaign.image_url = raw_data.get("image_url")
+        campaign.description = parsed_data.get("description") or raw_data.get("description", "")
+        campaign.image_url = raw_data.get("image_url") or parsed_data.get("image_url")
         campaign.is_active = True
         campaign.updated_at = datetime.utcnow()
         campaign.clean_text = raw_data.get("raw_text")
-
-        # Set Dates
-        end_date_str = self._parse_date(raw_data.get("date_text"), is_end=True)
+        
+        # 2. Update dates
+        current_date_str = datetime.now().strftime("%Y-%m-%d")
+        # Start date: logic in the scraper handles parsing, but AI provides a backup
         start_date_str = self._parse_date(raw_data.get("date_text"), is_end=False)
-        if end_date_str:
-            campaign.end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
         if start_date_str:
             campaign.start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-            
-        # Optional: Parse AI date overrides if they are present and valid
-        if parsed_data.get("end_date") and parsed_data["end_date"] != "None":
-             try:
-                 ai_end = datetime.strptime(parsed_data["end_date"].split('T')[0], "%Y-%m-%d").date()
-                 if not campaign.end_date or ai_end > campaign.end_date:
-                     campaign.end_date = ai_end
-             except: pass
+        elif parsed_data.get("start_date") and parsed_data["start_date"] != "None":
+            try: campaign.start_date = datetime.strptime(parsed_data["start_date"].split('T')[0], "%Y-%m-%d").date()
+            except: campaign.start_date = datetime.now().date()
+        else:
+            campaign.start_date = datetime.now().date() # Fallback to today as per user request
 
-        # AI parsed data integration
-        campaign.reward_value = parsed_data.get("reward_value")
-        campaign.reward_type = parsed_data.get("reward_type")
+        end_date_str = self._parse_date(raw_data.get("date_text"), is_end=True)
+        if end_date_str:
+            campaign.end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        elif parsed_data.get("end_date") and parsed_data["end_date"] != "None":
+            try: campaign.end_date = datetime.strptime(parsed_data["end_date"].split('T')[0], "%Y-%m-%d").date()
+            except: pass
+
+        # 3. Update metadata (Using AI Parser's standard keys)
+        campaign.sector = parsed_data.get("sector") or "diger"
+        campaign.brands = parsed_data.get("brands") or []
+        campaign.eligible_cards = parsed_data.get("cards") or [] # AI prompt uses 'cards'
+        campaign.participation_steps = parsed_data.get("participation") or "Kampanya otomatik katılımlıdır."
+        campaign.conditions = parsed_data.get("conditions") or [] # AI prompt uses 'conditions'
         campaign.reward_text = parsed_data.get("reward_text")
-        campaign.conditions = parsed_data.get("conditionsText")
-        campaign.eligible_cards = parsed_data.get("eligible_cards")
-        
-        # Setup AI Marketing text
-        participation = parsed_data.get("participation", "")
-        if participation and participation != "Bilinmiyor":
-            campaign.ai_marketing_text = f"📱 Katılım: {participation}"
+        campaign.reward_type = parsed_data.get("reward_type")
+        campaign.reward_value = parsed_data.get("reward_value")
+        campaign.min_spend = parsed_data.get("min_spend")
 
+        # Setup AI Marketing text
+        part_text = campaign.participation_steps if isinstance(campaign.participation_steps, str) else str(campaign.participation_steps)
+        campaign.ai_marketing_text = f"📱 Katılım: {part_text}"
+
+        # Sector Mapping
         sector_slug = parsed_data.get("sector")
         if sector_slug:
             sector = self.session.query(Sector).filter_by(slug=sector_slug).first()
@@ -373,17 +418,20 @@ class KuveytTurkScraper:
         try:
             self.session.flush()
             
-            # Handle Brands
+            # 4. Handle Brands (Fixed get_or_create to avoid name unique violation)
             brands_list = parsed_data.get("brands", [])
             if isinstance(brands_list, list) and brands_list:
-                # Clear old brands
+                # Clear old mapping
                 self.session.query(CampaignBrand).filter_by(campaign_id=campaign.id).delete()
                 
                 for brand_name in brands_list:
                     if not brand_name or type(brand_name) is not str: continue
+                    brand_name = brand_name.strip()
                     bslug = self._generate_slug(brand_name)
-                    if len(bslug) < 2: continue
-                    brand_obj = self.session.query(Brand).filter_by(slug=bslug).first()
+                    if not bslug: continue
+                    
+                    # Check by name OR slug to be safe
+                    brand_obj = self.session.query(Brand).filter((Brand.slug == bslug) | (Brand.name == brand_name)).first()
                     if not brand_obj:
                         brand_obj = Brand(name=brand_name[:255], slug=bslug[:255])
                         self.session.add(brand_obj)
@@ -432,9 +480,12 @@ class KuveytTurkScraper:
                 
                 # Exists check before heavy compute
                 existing = self.session.query(Campaign).filter_by(tracking_url=url).first()
-                if existing and existing.updated_at and (datetime.utcnow() - existing.updated_at).days < 2:
-                     print(f"   ⏭️  Skipping recently updated campaign.")
-                     continue
+                is_test_mode = os.getenv("TEST_MODE") == "1"
+                
+                if existing and not is_test_mode:
+                    if existing.updated_at and (datetime.utcnow() - existing.updated_at).days < 2:
+                        print(f"   ⏭️  Skipping recently updated campaign.")
+                        continue
                      
                 raw_data = self._extract_campaign_data(url)
                 if not raw_data:
