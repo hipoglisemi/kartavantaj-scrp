@@ -34,7 +34,7 @@ class TurkcellScraper:
     BASE_URL = "https://www.turkcell.com.tr"
     LISTING_URL = "https://www.turkcell.com.tr/kampanyalar/marka-kampanyalari/marka-kampanyalari"
     
-    def __init__(self, max_campaigns: int = 20, headless: bool = True):
+    def __init__(self, max_campaigns: int = 20, headless: bool = False):
         self.max_campaigns = max_campaigns
         self.headless = headless
         self.db: Optional[Session] = None
@@ -59,7 +59,7 @@ class TurkcellScraper:
             self._load_cache()
             
             async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=self.headless)
+                browser = await p.webkit.launch(headless=self.headless)
                 context = await browser.new_context(
                     user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     viewport={'width': 1280, 'height': 800}
@@ -102,7 +102,7 @@ class TurkcellScraper:
         """Scroll to the bottom to handle lazy loading and extract campaign links"""
         print(f"   🌐 Loading listing page: {self.LISTING_URL}")
         try:
-            await page.goto(self.LISTING_URL, wait_until="networkidle", timeout=60000)
+            await page.goto(self.LISTING_URL, wait_until="networkidle", timeout=90000)
             
             # Dismiss initial popups if any
             try:
@@ -279,20 +279,27 @@ class TurkcellScraper:
         
         try:
             self.db.add(campaign)
-            self.db.commit()
+            self.db.flush()
             
             # Link Brands
             for bid in brand_ids:
                 try:
-                    cb = CampaignBrand(campaign_id=campaign.id, brand_id=bid)
-                    self.db.add(cb)
-                except:
-                    pass
+                    # Check if already linked to avoid duplicate CampaignBrand entries
+                    existing_link = self.db.query(CampaignBrand).filter_by(campaign_id=campaign.id, brand_id=bid).first()
+                    if not existing_link:
+                        cb = CampaignBrand(campaign_id=campaign.id, brand_id=bid)
+                        self.db.add(cb)
+                        self.db.flush()
+                except Exception as cb_e:
+                    self.db.rollback()
+                    print(f"         ⚠️ Error linking brand {bid}: {cb_e}")
+                    # Re-acquire session or continue? For now, we just skip the broken link
+            
             self.db.commit()
             print(f"      ✅ Saved: {campaign.title}")
         except Exception as e:
             self.db.rollback()
-            print(f"      ❌ DB Save Error: {e}")
+            print(f"      ❌ DB Save Error for {url}: {e}")
 
     # --- CACHE & DB HELPERS ---
     def _load_cache(self):
@@ -345,18 +352,29 @@ class TurkcellScraper:
     def _get_or_create_brands(self, names: List[str], sector_id: Optional[int]) -> List[uuid.UUID]:
         ids = []
         for n in names:
-            key = n.lower()
+            if not n: continue
+            key = n.lower().strip()
             if key in self.brand_cache:
                 ids.append(self.brand_cache[key].id)
             else:
-                brand = self.db.query(Brand).filter(Brand.name == n).first()
-                if not brand:
-                    brand = Brand(name=n, slug=key.replace(" ", "-"), is_active=True)
-                    self.db.add(brand)
-                    self.db.flush()
-                self.brand_cache[key] = brand
-                ids.append(brand.id)
-        return ids
+                try:
+                    brand = self.db.query(Brand).filter(Brand.name.ilike(n)).first()
+                    if not brand:
+                        brand = Brand(name=n, slug=key.replace(" ", "-")[:50], is_active=True)
+                        self.db.add(brand)
+                        self.db.flush()
+                    self.brand_cache[key] = brand
+                    ids.append(brand.id)
+                except Exception as e:
+                    self.db.rollback()
+                    # Try to fetch it again, maybe it was created in another transaction
+                    brand = self.db.query(Brand).filter(Brand.name.ilike(n)).first()
+                    if brand:
+                        self.brand_cache[key] = brand
+                        ids.append(brand.id)
+                    else:
+                        print(f"         ⚠️ Could not create/find brand {n}: {e}")
+        return list(set(ids)) # Deduplicate
 
 if __name__ == "__main__":
     # Standard TEST_MODE handling
