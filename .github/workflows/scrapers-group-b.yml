@@ -20,6 +20,7 @@ jobs:
           - garanti_bonus
           - garanti_milesandsmiles
           - garanti_shopandfly
+          - turkcell
 
     name: "🤖 ${{ matrix.scraper }}"
 
