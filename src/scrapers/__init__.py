@@ -11,6 +11,10 @@ try:
 except ImportError: GarantiShopAndFlyScraper = None
 
 try:
+    from .vodafone import VodafoneScraper
+except ImportError: VodafoneScraper = None
+
+try:
     from .akbank_axess import AkbankAxessScraper
 except ImportError: AkbankAxessScraper = None
 
@@ -34,6 +38,7 @@ __all__ = [
     'GarantiBonusScraper',
     'GarantiMilesAndSmilesScraper',
     'GarantiShopAndFlyScraper',
+    'VodafoneScraper',
     'AkbankAxessScraper',
     'AkbankFreeScraper',
     'AkbankBusinessScraper',

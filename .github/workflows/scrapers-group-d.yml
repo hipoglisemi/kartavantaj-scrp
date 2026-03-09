@@ -25,6 +25,7 @@ jobs:
           - yapikredi_world
           - ziraat
           - turktelekom
+          - vodafone
 
     name: "🤖 ${{ matrix.scraper }}"
 
