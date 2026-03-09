@@ -146,9 +146,16 @@ class VodafoneScraper:
             h1 = soup.select_one(".gallery--header h1")
             title = h1.get_text(strip=True) if h1 else "Vodafone Kampanyası"
             
-            # Image extraction
-            img_tag = soup.select_one(".img-block img")
-            image_url = urljoin(self.BASE_URL, img_tag['src']) if img_tag and 'src' in img_tag.attrs else None
+            # Enhanced Image extraction
+            image_url = None
+            banner_img = soup.select_one(".banner__image")
+            if banner_img and 'src' in banner_img.attrs:
+                image_url = urljoin(self.BASE_URL, banner_img['src'])
+            
+            if not image_url:
+                img_tag = soup.select_one(".img-block img")
+                if img_tag and 'src' in img_tag.attrs:
+                    image_url = urljoin(self.BASE_URL, img_tag['src'])
             
             # Description (CMS Editor content)
             cms_editor = soup.select_one(".cms-editor")
