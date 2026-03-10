@@ -703,6 +703,16 @@ ANALİZ EDİLECEK METİN:
                 return separator.join(items) if len(items) > 1 else (items[0] if items else "")
             return str(val).strip()
 
+        def _to_clean_list(val: Any) -> list:
+            """Always return a list. If val is already a list, clean it. If string, wrap in list."""
+            if not val:
+                return []
+            if isinstance(val, list):
+                return [str(x).strip() for x in val if x and str(x).strip()]
+            # val is a string — wrap as single-item list (do NOT join characters!)
+            cleaned = str(val).strip()
+            return [cleaned] if cleaned else []
+
         normalized = {
             "title": data.get("title") or "Kampanya",
             "description": data.get("description") or "",
@@ -713,10 +723,10 @@ ANALİZ EDİLECEK METİN:
             "start_date": self._safe_date(data.get("start_date")),
             "end_date": self._safe_date(data.get("end_date")),
             "sector": data.get("sector") or "Diğer",
-            "brands": data.get("brands") or [], # Brands can stay list for DB mapping
-            "cards": _to_clean_string(data.get("cards"), separator=", "),
+            "brands": data.get("brands") or [],
+            "cards": _to_clean_list(data.get("cards")),       # LIST — scraper'lar ', '.join() yapıyor
             "participation": _to_clean_string(data.get("participation")),
-            "conditions": _to_clean_string(data.get("conditions"))
+            "conditions": _to_clean_list(data.get("conditions"))  # LIST — scraper'lar '\n'.join() yapıyor
         }
         
         return normalized

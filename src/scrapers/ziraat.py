@@ -341,11 +341,17 @@ class ZiraatScraper:
 
             # Conditions & Participation
             conds = ai_data.get("conditions", [])
+            if isinstance(conds, str):
+                conds = [c.strip() for c in conds.split("\n") if c.strip()]
             part_method = ai_data.get("participation")
             if part_method and "Detayları İnceleyin" not in part_method:
                 conds.insert(0, f"KATILIM: {part_method}")
             final_conditions = "\n".join(conds)
-            
+
+            cards_raw = ai_data.get("cards", [])
+            if isinstance(cards_raw, str):
+                cards_raw = [c.strip() for c in cards_raw.split(",") if c.strip()]
+
             # Dates
             vf = None
             vu = None
@@ -381,7 +387,7 @@ class ZiraatScraper:
                         clean_text=ai_data.get('_clean_text'),
                 reward_value=ai_data.get("reward_value"),
                 conditions=final_conditions,
-                eligible_cards=", ".join(ai_data.get("cards", [])),
+                eligible_cards=", ".join(cards_raw),
                 image_url=final_image,
                 start_date=vf,
                 end_date=vu,

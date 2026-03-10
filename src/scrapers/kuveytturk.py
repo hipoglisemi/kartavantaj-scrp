@@ -339,8 +339,23 @@ class KuveytTurkScraper:
         campaign.end_date = self._parse_date_string(parsed_data.get("end_date"))
         
         campaign.sector_id = self._get_sector_id(parsed_data.get("sector"))
-        campaign.eligible_cards = parsed_data.get("cards") or []
-        campaign.conditions = parsed_data.get("conditions") or []
+        
+        # eligible_cards: ai_parser'dan liste veya string gelebilir — her zaman string kaydet
+        cards_raw = parsed_data.get("cards") or []
+        if isinstance(cards_raw, list):
+            campaign.eligible_cards = ", ".join([c for c in cards_raw if c]) or None
+        else:
+            campaign.eligible_cards = str(cards_raw).strip() or None
+        if campaign.eligible_cards and len(campaign.eligible_cards) > 255:
+            campaign.eligible_cards = campaign.eligible_cards[:255]
+
+        # conditions: ai_parser'dan liste veya string gelebilir — her zaman \n-joined string kaydet
+        conditions_raw = parsed_data.get("conditions") or []
+        if isinstance(conditions_raw, list):
+            campaign.conditions = "\n".join([c for c in conditions_raw if c]) or None
+        else:
+            campaign.conditions = str(conditions_raw).strip() or None
+
         campaign.reward_text = parsed_data.get("reward_text")
         campaign.reward_type = parsed_data.get("reward_type")
         campaign.reward_value = parsed_data.get("reward_value")

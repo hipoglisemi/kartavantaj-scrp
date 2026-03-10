@@ -502,9 +502,15 @@ class IsbankMaximumGencScraper:
                     end_date = dt
 
             conds = ai_data.get("conditions", [])
+            if isinstance(conds, str):
+                conds = [c.strip() for c in conds.split("\n") if c.strip()]
             part = ai_data.get("participation")
             if part and "Detayları İnceleyin" not in part:
                 conds.insert(0, f"KATILIM: {part}")
+
+            cards_raw = ai_data.get("cards", [])
+            if isinstance(cards_raw, str):
+                cards_raw = [c.strip() for c in cards_raw.split(",") if c.strip()]
 
             campaign = Campaign(
                 card_id=self.card_id, sector_id=sector.id if sector else None,
@@ -515,7 +521,7 @@ class IsbankMaximumGencScraper:
                 reward_value=ai_data.get("reward_value"),
                 reward_type=ai_data.get("reward_type"),
                 conditions="\n".join(conds),
-                eligible_cards=", ".join(ai_data.get("cards", [])) or None,
+                eligible_cards=", ".join(cards_raw) or None,
                 image_url=data["image_url"],
                 start_date=start_date, end_date=end_date,
                 is_active=True, tracking_url=url,

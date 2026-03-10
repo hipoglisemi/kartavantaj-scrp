@@ -303,10 +303,21 @@ class TEBScraper:
         participation = ai_data.get("participation") or ""
         if participation:
             conditions_lines.append(f"KATILIM: {participation}")
-        eligible_cards_list = ai_data.get("cards", [])
+
+        # eligible_cards: ai_parser listesi döndürür ama guard ekle
+        cards_raw = ai_data.get("cards", [])
+        if isinstance(cards_raw, str):
+            cards_raw = [c.strip() for c in cards_raw.split(",") if c.strip()]
+        eligible_cards_list = cards_raw
+
         if eligible_cards_list:
             conditions_lines.append(f"GEÇERLİ KARTLAR: {', '.join(eligible_cards_list)}")
-        conditions_lines.extend(ai_data.get("conditions", []))
+
+        # conditions listesi
+        conds_raw = ai_data.get("conditions", [])
+        if isinstance(conds_raw, str):
+            conds_raw = [c.strip() for c in conds_raw.split("\n") if c.strip()]
+        conditions_lines.extend(conds_raw)
 
         eligible_cards_str = ", ".join(eligible_cards_list) if eligible_cards_list else None
         if eligible_cards_str and len(eligible_cards_str) > 255:

@@ -438,12 +438,19 @@ class ParamScraper:
                         pass
 
             conds = ai_data.get("conditions", [])
+            if isinstance(conds, str):
+                conds = [c.strip() for c in conds.split("\n") if c.strip()]
             part = ai_data.get("participation")
             if part:
                 conds.insert(0, f"KATILIM: {part}")
                 
             conds = self._filter_conditions(conds)
             final_conditions = "\n".join(conds) if conds else "\n".join(data["conditions"])
+
+            cards_raw = ai_data.get("cards", [])
+            if isinstance(cards_raw, str):
+                cards_raw = [c.strip() for c in cards_raw.split(",") if c.strip()]
+            eligible_cards_str = ", ".join(cards_raw) or "ParamKart"
 
             if existing:
                 existing.sector_id = sector.id if sector else None
@@ -453,7 +460,7 @@ class ParamScraper:
                 existing.reward_value = ai_data.get("reward_value")
                 existing.reward_type = ai_data.get("reward_type")
                 existing.conditions = final_conditions
-                existing.eligible_cards = ", ".join(ai_data.get("cards", [])) or "ParamKart"
+                existing.eligible_cards = eligible_cards_str
                 if data["image_url"]:
                     existing.image_url = data["image_url"]
                 existing.start_date = start_date or existing.start_date
@@ -472,7 +479,7 @@ class ParamScraper:
                     reward_value=ai_data.get("reward_value"),
                     reward_type=ai_data.get("reward_type"),
                     conditions=final_conditions,
-                    eligible_cards=", ".join(ai_data.get("cards", [])) or "ParamKart",
+                    eligible_cards=eligible_cards_str,
                     image_url=data.get("image_url"),
                     start_date=start_date, end_date=end_date,
                     is_active=True, tracking_url=url,
