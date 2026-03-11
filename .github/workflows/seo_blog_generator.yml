@@ -21,11 +21,18 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install google-generativeai python-dotenv psycopg2-binary python-slugify
+          pip install -r requirements.txt
+
+      - name: Create Vertex Key File
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > vertex-key.json
 
       - name: Run SEO Blog Generator AI
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          USE_VERTEX_AI: "True"
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
+          GOOGLE_APPLICATION_CREDENTIALS: "vertex-key.json"
+          GEMINI_MODEL: "gemini-2.0-flash-lite"
         run: |
           python generate_seo_blog.py
