@@ -32,12 +32,11 @@ jobs:
     - name: Run Data Quality Auto-Fixer
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        AI_PROVIDER: ${{ secrets.AI_PROVIDER }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GEMINI_MODEL: ${{ secrets.GEMINI_MODEL || 'gemini-2.5-flash-lite' }}
-        USE_VERTEX_AI: ${{ secrets.USE_VERTEX_AI || 'True' }}
-        GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
-        GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+        AI_PROVIDER: ${{ vars.AI_PROVIDER || 'vertex' }}
+        GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash-lite' }}
+        USE_VERTEX_AI: ${{ vars.USE_VERTEX_AI || 'True' }}
+        GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
+        GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
         GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
       run: |
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python data_quality_autofix.py

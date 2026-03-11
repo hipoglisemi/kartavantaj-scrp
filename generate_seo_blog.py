@@ -158,19 +158,58 @@ def save_to_database(topic, html_content, meta_description, image_url):
             cur.close()
             conn.close()
 
+def get_existing_titles_and_slugs():
+    """Fetch existing titles and slugs from the database to avoid duplicates."""
+    print("🔍 Checking database for existing blog posts...")
+    conn = None
+    titles = set()
+    slugs = set()
+    try:
+        conn = psycopg2.connect(DB_URL)
+        cur = conn.cursor()
+        cur.execute('SELECT title, slug FROM "blogs"')
+        rows = cur.fetchall()
+        for row in rows:
+            titles.add(row[0].lower().strip())
+            slugs.add(row[1])
+    except Exception as e:
+        print(f"⚠️ Could not fetch existing blogs: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return titles, slugs
+
 def main():
     print("🚀 Starting Kartavantaj SEO Auto-Blog Generator")
-    # 1. Pick a random topic and image
-    topic = random.choice(TOPICS)
+    
+    # 1. Fetch existing data to avoid duplicates
+    existing_titles, existing_slugs = get_existing_titles_and_slugs()
+    
+    # 2. Filter topics that haven't been written yet
+    available_topics = [t for t in TOPICS if t.lower().strip() not in existing_titles]
+    
+    if not available_topics:
+        print("📭 No new topics to write about! All topics in TOPICS list already exist in database.")
+        return
+
+    # 3. Pick a random topic (from available ones) and image
+    topic = random.choice(available_topics)
     image_url = random.choice(COVER_IMAGES)
     
-    # 2. Generate content
+    print(f"📝 Selected New Topic: '{topic}'")
+    
+    # Check if a slug collision might happen (though save_to_database adds a timestamp, stay safe)
+    potential_slug = slugify(topic)
+    if any(s.startswith(potential_slug) for s in existing_slugs):
+        print(f"💡 Note: A similar slug already exists for '{topic}', but we will proceed with a unique timestamped slug.")
+
+    # 4. Generate content
     html_content = generate_seo_article(topic)
     
-    # 3. Generate meta description
+    # 5. Generate meta description
     meta_description = generate_meta_description(topic, html_content)
     
-    # 4. Save to DB
+    # 6. Save to DB
     save_to_database(topic, html_content, meta_description, image_url)
     print("✨ Process completed successfully.")
 

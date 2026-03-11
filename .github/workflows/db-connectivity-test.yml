@@ -10,10 +10,10 @@ jobs:
     steps:
       - name: Test PostgreSQL Connection
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
-          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
-          GEMINI_MODEL: "gemini-2.5-flash-lite"
+          DATABASE_URL: ${{ secrets['DATABASE_URL'] }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-2.5-flash-lite' }}
         run: |
           echo "Testing DB connectivity..."
           python3 -c "
