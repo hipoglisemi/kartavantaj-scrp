@@ -2,8 +2,8 @@ import { VertexAI } from '@google-cloud/vertexai';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const useVertexAi = process.env.USE_VERTEX_AI === 'True';
-const projectId = process.env.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854';
-const location = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
+const projectId = process.env.GOOGLE_CLOUD_PROJECT || '';
+const location = process.env.GOOGLE_CLOUD_LOCATION || '';
 
 // For local dev, we might use vertex-key.json
 // For production (GitHub), we use GOOGLE_APPLICATION_CREDENTIALS_JSON path (which we handle in Python, but here we expect the env var to be set)
