@@ -30,8 +30,9 @@ if not DB_URL:
 
 # Gemini / Vertex AI kurulumu
 from src.utils.gemini_client import generate_with_rotation
+from google.genai import types
 
-_GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+_GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 MODEL_NAME = _GEMINI_MODEL_NAME
 
 # Minimum kaç kez aratılmış olması gerektiği
@@ -189,9 +190,15 @@ def generate_pillar_content(keyword: str) -> str:
     5. Sonuç paragrafında kullanıcıyı aksiyon almaya yönlendir ("En güncel kampanyaları keşfetmek için tıklayın" gibi).
     6. Yanıt olarak SADECE HTML kodunu ver. Başka hiçbir şey ekleme.
     """
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=6000
+    )
+    
     html = generate_with_rotation(
         prompt=prompt,
-        model=MODEL_NAME
+        model=MODEL_NAME,
+        config=config
     )
     # Markdown blok kalıntısı temizle
     if html.startswith("```html"):
@@ -209,7 +216,11 @@ def generate_meta_description(keyword: str) -> str:
     Konu: "{keyword}"
     Yanıt olarak SADECE meta açıklamasını ver.
     """
-    text = generate_with_rotation(prompt=prompt, model=MODEL_NAME)
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=6000
+    )
+    text = generate_with_rotation(prompt=prompt, model=MODEL_NAME, config=config)
     return text[:160]
 
 
@@ -221,7 +232,11 @@ def generate_seo_title(keyword: str) -> str:
     Konu: "{keyword}"
     Yanıt olarak SADECE başlık metnini ver. Tırnak işareti veya etiket kullanma.
     """
-    return generate_with_rotation(prompt=prompt, model=MODEL_NAME)
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=6000
+    )
+    return generate_with_rotation(prompt=prompt, model=MODEL_NAME, config=config)
 
 
 # ─────────────────────────────────────────────

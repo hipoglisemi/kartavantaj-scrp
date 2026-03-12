@@ -15,8 +15,9 @@ if not DB_URL:
 
 # Setup Gemini API (using Vertex AI or legacy fallback)
 from src.utils.gemini_client import generate_with_rotation
+from google.genai import types
 
-_GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+_GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
 MODEL_NAME = _GEMINI_MODEL_NAME
 
 # Topic ideas to randomly select from
@@ -64,9 +65,15 @@ def generate_seo_article(topic):
     5. Yanıt olarak SADECE makalenin HTML kodunu ver.
     """
     
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=6000
+    )
+    
     html_content = generate_with_rotation(
         prompt=prompt,
-        model=MODEL_NAME
+        model=MODEL_NAME,
+        config=config
     )
     
     # Remove markdown codeblocks if AI messed up
@@ -83,9 +90,14 @@ def generate_meta_description(topic, html_content):
     İçeriğe tıklatma (Call to Action) duygusu barındırsın. Yanıt olarak SADECE meta açıklamasını ver.
     Konu: {topic}
     """
+    config = types.GenerateContentConfig(
+        temperature=0.0,
+        max_output_tokens=6000
+    )
     return generate_with_rotation(
         prompt=prompt,
-        model=MODEL_NAME
+        model=MODEL_NAME,
+        config=config
     )
 
 def save_to_database(topic, html_content, meta_description, image_url):

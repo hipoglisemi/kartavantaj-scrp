@@ -52,7 +52,7 @@ def generate_with_rotation(
     """
     from google import genai as _sdk
 
-    model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
+    model_name = model or os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
     keys = _load_keys()
     last_error: Exception | None = None
 
