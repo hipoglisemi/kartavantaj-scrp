@@ -517,7 +517,6 @@ class IsbankMaximumGencScraper:
                 slug=slug, title=formatted_title,
                 description=ai_data.get("description") or data["title"][:200],
                 reward_text=ai_data.get("reward_text"),
-                        clean_text=ai_data.get('_clean_text'),
                 reward_value=ai_data.get("reward_value"),
                 reward_type=ai_data.get("reward_type"),
                 conditions="\n".join(conds),

@@ -419,7 +419,6 @@ class AlbarakaScraper:
                 image_url=data.get("image_url"),
                 start_date=start_date,
                 end_date=end_date,
-                clean_text=data.get('raw_text'),
                 is_active=True,
                 tracking_url=data["source_url"],
                 created_at=datetime.utcnow(),

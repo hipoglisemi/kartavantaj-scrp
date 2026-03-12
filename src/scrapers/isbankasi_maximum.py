@@ -524,7 +524,6 @@ class IsbankMaximumScraper:
                 image_url=data["image_url"],
                 start_date=start_date,
                 end_date=end_date,
-                clean_text=ai_data.get('_clean_text') if 'ai_data' in locals() else None,
                 is_active=True,
                 tracking_url=data["source_url"],
                 created_at=datetime.utcnow(),
