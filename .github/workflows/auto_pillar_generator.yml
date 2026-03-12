@@ -1,0 +1,38 @@
+name: SEO Pillar Page Auto-Generator
+
+on:
+  schedule:
+    # Her Salı ve Perşembe Türkiye saati 08:00 (UTC 05:00)
+    - cron: '0 5 * * 2,4'
+  workflow_dispatch: # Manuel tetikleme (test için)
+
+jobs:
+  generate-pillar-page:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Vertex Key File
+        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > vertex-key.json
+
+      - name: Run Autonomous SEO Pillar Generator
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          USE_VERTEX_AI: "True"
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
+          GOOGLE_APPLICATION_CREDENTIALS: "vertex-key.json"
+          GEMINI_MODEL: "gemini-2.0-flash-lite"
+        run: |
+          python auto_seo_pillar_generator.py
