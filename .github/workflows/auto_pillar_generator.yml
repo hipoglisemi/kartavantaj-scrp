@@ -2,8 +2,8 @@ name: SEO Pillar Page Auto-Generator
 
 on:
   schedule:
-    # Her Salı ve Perşembe Türkiye saati 08:00 (UTC 05:00)
-    - cron: '0 5 * * 2,4'
+    # Her Salı ve Perşembe Türkiye saati 10:00 (UTC 07:00)
+    - cron: '0 7 * * 2,4'
   workflow_dispatch: # Manuel tetikleme (test için)
 
 jobs:
@@ -29,6 +29,9 @@ jobs:
       - name: Run Autonomous SEO Pillar Generator
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           USE_VERTEX_AI: "True"
           GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
           GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}

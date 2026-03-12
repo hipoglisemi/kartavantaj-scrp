@@ -4,7 +4,7 @@ name: "🆗 Scrapers – Grup D"
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # TSİ 04:30 (UTC 01:30) — günde 1 kere
+    - cron: '30 2 * * *'   # TSİ 05:30 (UTC 02:30) — Group D, C'den 30dk sonra
   workflow_dispatch: {}
 
 jobs:
@@ -56,7 +56,9 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GEMINI_MODEL: "gemini-3.1-flash-lite-preview"
+        GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+        GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+        GEMINI_MODEL: "gemini-2.0-flash-lite"
         USE_VERTEX_AI: "False"
         PYTHONPATH: ${{ github.workspace }}
         PYTHONUNBUFFERED: '1'

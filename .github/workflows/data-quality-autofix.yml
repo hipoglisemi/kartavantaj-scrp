@@ -2,8 +2,8 @@ name: Data Quality Auto-Fixer
 
 on:
   schedule:
-    # TSİ 06:00 → UTC 03:00 — günde 1 kere
-    - cron: '0 3 * * *'
+    # TSİ 07:00 → UTC 04:00 — günde 1 kere
+    - cron: '0 4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -33,7 +33,9 @@ jobs:
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GEMINI_MODEL: "gemini-3.1-flash-lite-preview"
+        GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+        GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
+        GEMINI_MODEL: "gemini-2.0-flash-lite"
         USE_VERTEX_AI: "False"
       run: |
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" python data_quality_autofix.py

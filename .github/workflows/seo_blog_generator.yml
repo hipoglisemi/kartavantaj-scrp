@@ -2,8 +2,8 @@ name: SEO Blog Auto-Generator
 
 on:
   schedule:
-    # Pazartesi, Çarşamba ve Cuma günleri Türkiye saati ile 10:00'da çalışır (UTC 07:00)
-    - cron: '0 7 * * 1,3,5'
+    # Pazartesi, Çarşamba ve Cuma günleri Türkiye saati ile 09:00'da çalışır (UTC 06:00)
+    - cron: '0 6 * * 1,3,5'
   workflow_dispatch: # Manuel tetikleme (Test için)
 
 jobs:
@@ -29,6 +29,9 @@ jobs:
       - name: Run SEO Blog Generator AI
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
+          GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           USE_VERTEX_AI: "True"
           GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
           GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}

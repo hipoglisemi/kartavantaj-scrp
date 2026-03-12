@@ -373,53 +373,16 @@ BANK_RULES = {
 }
 
 # ── AI Provider Configuration ──────────────────────────────────────────────
-from google import genai as _genai_sdk
 from google.genai import types
+from src.utils.gemini_client import get_gemini_client, generate_with_rotation
 
 _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview")
-_use_vertex_ai = os.getenv("USE_VERTEX_AI", "False").lower() == "true"
-
-if _use_vertex_ai:
-    _project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-    _location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-    _credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    _credentials_json = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
-    
-    if not _project_id:
-        raise ValueError("USE_VERTEX_AI is True but GOOGLE_CLOUD_PROJECT is not set.")
-        
-    # Configure via Service Account JSON STRING (Ideal for GitHub Secrets)
-    if _credentials_json:
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp:
-            temp.write(_credentials_json)
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp.name
-            print(f"[DEBUG] Using credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON string.")
-    elif _credentials_path and os.path.exists(_credentials_path):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _credentials_path
-        print(f"[DEBUG] Using credentials from file: {_credentials_path}")
-        
-    _gemini_client = _genai_sdk.Client(
-        vertexai=True,
-        project=_project_id,
-        location=_location
-    )
-    _gemini_keys: list = []  # No key rotation in Vertex AI mode
-    print(f"[DEBUG] Gemini initialized via Vertex AI (Project: {_project_id}, Model: {_GEMINI_MODEL_NAME}).")
-else:
-    # ── Collect all available API keys for rotation ──────────────────
-    _gemini_keys: list = []
-    # Test GEMINI_API_KEY and GEMINI_API_KEY_1 through GEMINI_API_KEY_19
-    for _env_name in ["GEMINI_API_KEY"] + [f"GEMINI_API_KEY_{i}" for i in range(1, 20)]:
-        _k = os.getenv(_env_name)
-        if _k:
-            _gemini_keys.append(_k)
-
-    if not _gemini_keys:
-        raise ValueError("No GEMINI_API_KEY found. Set GEMINI_API_KEY or GEMINI_API_KEY_1, GEMINI_API_KEY_2... in .env")
-
-    _gemini_client = _genai_sdk.Client(api_key=_gemini_keys[0])
-    print(f"[DEBUG] Gemini initialized via AI Studio Key(s) ({len(_gemini_keys)} key(s) available, Model: {_GEMINI_MODEL_NAME}).")
+try:
+    _gemini_client = get_gemini_client()
+    print(f"[DEBUG] Gemini AI initialized via gemini_client module (Model: {_GEMINI_MODEL_NAME}).")
+except Exception as e:
+    print(f"[WARN] Gemini client init failed: {e}")
+    _gemini_client = None
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -432,21 +395,8 @@ class AIParser:
 
     def __init__(self, model_name: str = None):
         self._client = _gemini_client
-        self._key_index = 0  # Current key index for rotation
         self.model = None
-        print(f"[DEBUG] AIParser using Gemini | model: {_GEMINI_MODEL_NAME} | keys: {len(_gemini_keys)}")
-
-    def _rotate_key(self) -> bool:
-        """Switch to next available API key. Returns True if rotated, False if exhausted."""
-        if _use_vertex_ai or len(_gemini_keys) <= 1:
-            return False
-        next_index = (self._key_index + 1) % len(_gemini_keys)
-        if next_index == self._key_index:
-            return False
-        self._key_index = next_index
-        self._client = _genai_sdk.Client(api_key=_gemini_keys[self._key_index])
-        print(f"   🔄 Rotated to API key #{self._key_index + 1}/{len(_gemini_keys)}")
-        return True
+        print(f"[DEBUG] AIParser using Gemini | model: {_GEMINI_MODEL_NAME}")
 
     # ── Unified call helper ──────────────────────────────────────────────────
     def _call_ai(self, prompt: str, timeout_sec: int = 65) -> str:
@@ -464,17 +414,15 @@ class AIParser:
             max_output_tokens=6000
         )
 
-        response = call_with_timeout(
-            self._client.models.generate_content,
-            args=(),
+        return call_with_timeout(
+            generate_with_rotation,
             kwargs={
+                "prompt": prompt,
                 "model": _GEMINI_MODEL_NAME, 
-                "contents": prompt,
                 "config": config
             },
             timeout_sec=timeout_sec,
         )
-        return response.text.strip()
     # ────────────────────────────────────────────────────────────────────────
         
     def parse_campaign_data(
@@ -525,13 +473,9 @@ class AIParser:
             except Exception as e:
                 error_str = str(e)
                 if "429" in error_str or "Resource exhausted" in error_str or "rate_limit" in error_str.lower() or "503" in error_str:
-                    # Try rotating to next key first
-                    if self._rotate_key():
-                        print(f"   🔑 Rate limit hit, switched to next key (Attempt {attempt+1}/{max_retries})")
-                        continue
-                    # No more keys — exponential backoff
+                    # Key rotation is natively handled by gemini_client. If we drop here, ALL keys failed.
                     wait_time = (attempt + 1) * 3 
-                    print(f"   ⚠️ API limit or 503 error. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries}) | {error_str[:100]}")
+                    print(f"   ⚠️ API limit across all keys or 503 error. Waiting {wait_time}s... (Attempt {attempt+1}/{max_retries}) | {error_str[:100]}")
                     import time
                     time.sleep(wait_time)
                     continue

@@ -28,32 +28,10 @@ DB_URL = os.getenv("DATABASE_URL")
 if not DB_URL:
     raise ValueError("DATABASE_URL must be set in .env")
 
-# Gemini / Vertex AI kurulumu (generate_seo_blog.py ile aynı pattern)
-from google import genai as _genai_sdk
+# Gemini / Vertex AI kurulumu
+from src.utils.gemini_client import generate_with_rotation
+
 _GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-lite")
-_use_vertex_ai = os.getenv("USE_VERTEX_AI", "False").lower() == "true"
-
-if _use_vertex_ai:
-    _project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-    _location = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
-    _credentials_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if not _project_id:
-        raise ValueError("USE_VERTEX_AI is True but GOOGLE_CLOUD_PROJECT is not set.")
-    if _credentials_path and os.path.exists(_credentials_path):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _credentials_path
-    genai_client = _genai_sdk.Client(
-        vertexai=True,
-        project=_project_id,
-        location=_location
-    )
-    print(f"[AI] Vertex AI bağlantısı kuruldu. Proje: {_project_id}")
-else:
-    _gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY_1")
-    if not _gemini_key:
-        raise ValueError("Gemini API anahtarı bulunamadı.")
-    genai_client = _genai_sdk.Client(api_key=_gemini_key)
-    print("[AI] AI Studio anahtarı ile bağlantı kuruldu.")
-
 MODEL_NAME = _GEMINI_MODEL_NAME
 
 # Minimum kaç kez aratılmış olması gerektiği
@@ -211,11 +189,10 @@ def generate_pillar_content(keyword: str) -> str:
     5. Sonuç paragrafında kullanıcıyı aksiyon almaya yönlendir ("En güncel kampanyaları keşfetmek için tıklayın" gibi).
     6. Yanıt olarak SADECE HTML kodunu ver. Başka hiçbir şey ekleme.
     """
-    response = genai_client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
+    html = generate_with_rotation(
+        prompt=prompt,
+        model=MODEL_NAME
     )
-    html = response.text.strip()
     # Markdown blok kalıntısı temizle
     if html.startswith("```html"):
         html = html[7:]
@@ -232,11 +209,8 @@ def generate_meta_description(keyword: str) -> str:
     Konu: "{keyword}"
     Yanıt olarak SADECE meta açıklamasını ver.
     """
-    response = genai_client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text.strip()[:160]
+    text = generate_with_rotation(prompt=prompt, model=MODEL_NAME)
+    return text[:160]
 
 
 def generate_seo_title(keyword: str) -> str:
@@ -247,11 +221,7 @@ def generate_seo_title(keyword: str) -> str:
     Konu: "{keyword}"
     Yanıt olarak SADECE başlık metnini ver. Tırnak işareti veya etiket kullanma.
     """
-    response = genai_client.models.generate_content(
-        model=MODEL_NAME,
-        contents=prompt
-    )
-    return response.text.strip()
+    return generate_with_rotation(prompt=prompt, model=MODEL_NAME)
 
 
 # ─────────────────────────────────────────────
