@@ -214,8 +214,15 @@ def run_autofix():
                 # Mojibake check (UTF-8/ISO mismatch)
                 mojibake_pattern = re.compile(r'[ÄÃÅ][\u0080-\u00bf]')
                 has_mojibake = False
-                if c.clean_text and mojibake_pattern.search(c.clean_text): has_mojibake = True
-                if c.description and mojibake_pattern.search(c.description): has_mojibake = True
+                
+                # Sadece daha önce TAMİR EDİLMEMİŞ kampanyalarda clean_text mojibake kontrolü yap
+                # Çünkü AI parser clean_text'i tamir etmez, sadece description'ı tamir eder. Bu da sonsuz döngü yaratır.
+                if c.clean_text and not c.auto_corrected and mojibake_pattern.search(c.clean_text): 
+                    has_mojibake = True
+                
+                # Ancak kullanıcıların gördüğü asıl açıklamada mojibake varsa her zaman tamir et
+                if c.description and mojibake_pattern.search(c.description): 
+                    has_mojibake = True
                 
                 if has_mojibake:
                     is_defective = True
