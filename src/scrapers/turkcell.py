@@ -191,10 +191,10 @@ class TurkcellScraper:
                     header_text = (await header.inner_text()).strip()
                     if not header_text: continue
                     
-                    await page.evaluate('(h) => h.click()', header)
+                    await page.evaluate('(h) => h.click()', header)  # type: ignore # pyre-ignore
                     await asyncio.sleep(0.5)
                     
-                    text = await page.evaluate('''(header) => {
+                    text = await page.evaluate('''(header) => {  # type: ignore # pyre-ignore
                         const item = header.closest('.ant-collapse-item');
                         return item && item.querySelector('.ant-collapse-content') ? item.querySelector('.ant-collapse-content').innerText : "";  # type: ignore # pyre-ignore[7]
                     }''', header)

@@ -256,7 +256,7 @@ class DunyaKatilimScraper:
         """Save to DB"""
         try:
             primary_card = self._get_or_create_card(card_name)
-            sector = self._get_sector(data.get("sector"))
+            sector = self._get_sector(str(data.get("sector") or ""))
             brand_ids = self._get_or_create_brands(data.get("brands", []), sector.id if sector else None)  # type: ignore # pyre-ignore[16]
             
             text = data.get("title", "").lower()

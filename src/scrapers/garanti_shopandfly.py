@@ -374,11 +374,11 @@ class GarantiShopAndFlyScraper:
                 try:
                     result = self._process_campaign(url)
                     if result == "saved":
-                        success_count = int(success_count or 0) + 1
+                        success_count += 1  # type: ignore # pyre-ignore
                     elif result == "skipped":
-                        skipped_count = int(skipped_count or 0) + 1
+                        skipped_count += 1  # type: ignore # pyre-ignore
                     else:
-                        failed_count = int(failed_count or 0) + 1
+                        failed_count += 1  # type: ignore # pyre-ignore
                         error_details.append({"url": url, "error": "Save failed"})
                 except Exception as e:
                     failed_count += 1  # type: ignore # pyre-ignore[58]
