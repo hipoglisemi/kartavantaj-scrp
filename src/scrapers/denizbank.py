@@ -305,27 +305,19 @@ class DenizbankScraper:
         return campaign_urls
 
     def _resolve_sector_by_name(self, sector_name):
-        """Map AI sector name to DB sector ID."""
+        """Map AI sector slug to DB sector ID. (AI parser returns a sector slug like 'market-gida')"""
         if not sector_name:
             return 18 # Diğer
         try:
             with self.engine.connect() as conn:
+                # Search by slug since AI is strictly instructed to return valid slugs
                 result = conn.execute(
-                    text("SELECT id FROM sectors WHERE LOWER(name) = LOWER(:name) LIMIT 1"),
-                    {"name": sector_name}
-                ).fetchone()
-                
-                if result:
-                    return result[0]
-                
-                # Fuzzy match
-                result = conn.execute(
-                    text("SELECT id FROM sectors WHERE LOWER(name) LIKE LOWER(:name) LIMIT 1"),
-                    {"name": f"%{sector_name}%"}
+                    text("SELECT id FROM sectors WHERE slug = :slug LIMIT 1"),
+                    {"slug": sector_name}
                 ).fetchone()
                 
                 return result[0] if result else 18
-        except:
+        except Exception:
             return 18
 
     def _process_campaign(self, url):

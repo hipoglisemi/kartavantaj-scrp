@@ -201,14 +201,15 @@ class QNBScraper:
             raise e
 
     def _resolve_sector_by_name(self, sector_name: str) -> Optional[int]:
-        """Find sector ID by name."""
+        """Find sector ID by slug. (AI parser returns a sector slug like 'market-gida')"""
         if not sector_name:
             return None
         try:
             with self.engine.connect() as conn:
+                # Search by slug since AI is strictly instructed to return valid slugs
                 result = conn.execute(
-                    text("SELECT id FROM sectors WHERE name ILIKE :name LIMIT 1"),
-                    {"name": f"%{sector_name}%"}
+                    text("SELECT id FROM sectors WHERE slug = :slug LIMIT 1"),
+                    {"slug": sector_name}
                 ).fetchone()
                 return result[0] if result else None
         except Exception:
