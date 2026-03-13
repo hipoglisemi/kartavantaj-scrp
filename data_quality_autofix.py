@@ -250,12 +250,26 @@ def run_autofix(limit: int = 50):
                     # Fallback to fetching fresh HTML for old unoptimized campaigns
                     print(f"   🌐 Fetching HTML fallback for old campaign...")
                     html_text = fetch_html(c.tracking_url)
-                    if not html_text or len(html_text) < 50:
-                        print(f"   ❌ Could not extract meaningful text from URL. Skipping.")
-                        continue
                     
-                    # Clean text with the same preprocessor scrapers use
-                    text_to_parse = _clean_text(None, html_text)
+                    if html_text and len(html_text) >= 50:
+                        # Clean text with the same preprocessor scrapers use
+                        text_to_parse = _clean_text(None, html_text)
+                        print(f"   ✅ URL fetch successful ({len(text_to_parse)} chars)")
+                    else:
+                        # SECOND FALLBACK: Use description and conditions if URL fetching fails (likely bot protection or dead link)
+                        print(f"   ⚠️ URL fetch failed (possible bot-block or 404).")
+                        
+                        fallback_segments = []
+                        if c.description: fallback_segments.append(c.description)
+                        if c.conditions: fallback_segments.append(c.conditions)
+                        
+                        fallback_text = " ".join(fallback_segments)
+                        if len(fallback_text) > 20: 
+                            print(f"   🔄 Using secondary fallback: Existing Description/Conditions ({len(fallback_text)} chars)")
+                            text_to_parse = fallback_text
+                        else:
+                            print(f"   ❌ Could not extract meaningful text from URL or DB fields. Skipping.")
+                            continue
 
                 print(f"   🤖 Sending {len(text_to_parse)} characters to AI for re-parsing...")
                 ai_data = parse_campaign_data(
