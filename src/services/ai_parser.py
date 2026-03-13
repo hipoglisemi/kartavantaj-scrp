@@ -775,6 +775,12 @@ ANALİZ EDİLECEK METİN:
         # If no JSON found, try parsing entire response
         return json.loads(text)
     
+    def _get_last_day_of_month(self, date_obj: datetime) -> datetime:
+        """Helper to get the last day of the month for a given date."""
+        import calendar
+        last_day = calendar.monthrange(date_obj.year, date_obj.month)[1]
+        return date_obj.replace(day=last_day)
+
     def _normalize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize and validate parsed data"""
         
@@ -810,6 +816,27 @@ ANALİZ EDİLECEK METİN:
                 cleaned = bullet_pattern.sub('', cleaned).strip()
             return [cleaned] if cleaned else []
 
+        # Get dates
+        parsed_start = self._safe_date(data.get("start_date"))
+        parsed_end = self._safe_date(data.get("end_date"))
+        
+        # Fallback Logic (Madde 1, 2, 3)
+        now = datetime.now()
+        if not parsed_start and not parsed_end:
+            # 1. Tarih hiç yok ise
+            parsed_start = now.strftime("%Y-%m-%d")
+            parsed_end = self._get_last_day_of_month(now).strftime("%Y-%m-%d")
+        elif not parsed_start and parsed_end:
+            # 2. başlangıc tarihi yok-bitiş tarihi var ise
+            parsed_start = now.strftime("%Y-%m-%d")
+        elif parsed_start and not parsed_end:
+            # 3. başlangıc tarihi var-bitiş tarihi yok ise
+            try:
+                start_dt = datetime.strptime(parsed_start, "%Y-%m-%d")
+                parsed_end = self._get_last_day_of_month(start_dt).strftime("%Y-%m-%d")
+            except:
+                parsed_end = self._get_last_day_of_month(now).strftime("%Y-%m-%d")
+
         normalized = {
             "title": data.get("title") or "Kampanya",
             "description": data.get("description") or "",
@@ -818,8 +845,8 @@ ANALİZ EDİLECEK METİN:
             "reward_type": data.get("reward_type"),
             "reward_text": data.get("reward_text") or "Kampanya Fırsatı",
             "min_spend": self._safe_int(data.get("min_spend")),
-            "start_date": self._safe_date(data.get("start_date")),
-            "end_date": self._safe_date(data.get("end_date")),
+            "start_date": parsed_start,
+            "end_date": parsed_end,
             "sector": data.get("sector") or "Diğer",
             "brands": data.get("brands") or [],
             "cards": _to_clean_list(data.get("cards")),

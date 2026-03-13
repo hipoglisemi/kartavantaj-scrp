@@ -319,23 +319,50 @@ def run_autofix(limit: int = 50):
                         c.eligible_cards = cards_str
                         updated = True
 
-                if not c.start_date or FORCE_ALL:
-                    if ai_data.get("start_date"):
-                        print(f"   ✨ Repaired Start Date: {ai_data['start_date']}")
-                        from datetime import datetime
-                        try:
-                            c.start_date = datetime.strptime(ai_data["start_date"], "%Y-%m-%d")
-                            updated = True
-                        except: pass
+                def get_last_day_of_month(date_obj):
+                    import calendar
+                    last_day = calendar.monthrange(date_obj.year, date_obj.month)[1]
+                    return date_obj.replace(day=last_day)
 
-                if not c.end_date or FORCE_ALL:
-                    if ai_data.get("end_date"):
-                        print(f"   ✨ Repaired End Date: {ai_data['end_date']}")
-                        from datetime import datetime
+                baseline_date = c.created_at or datetime.now()
+
+                # Start Date Repair
+                if not c.start_date or FORCE_ALL:
+                    new_start = None
+                    if ai_data.get("start_date"):
                         try:
-                            c.end_date = datetime.strptime(ai_data["end_date"], "%Y-%m-%d")
-                            updated = True
+                            new_start = datetime.strptime(ai_data["start_date"], "%Y-%m-%d").date()
                         except: pass
+                    
+                    # Fallback if AI didn't find it
+                    if not new_start:
+                        print(f"   🔄 Falling back Start Date to Created At: {baseline_date.date()}")
+                        new_start = baseline_date.date()
+                    
+                    if new_start:
+                        c.start_date = new_start
+                        updated = True
+                        print(f"   ✨ Repaired Start Date: {c.start_date}")
+
+                # End Date Repair
+                if not c.end_date or FORCE_ALL:
+                    new_end = None
+                    if ai_data.get("end_date"):
+                        try:
+                            new_end = datetime.strptime(ai_data["end_date"], "%Y-%m-%d").date()
+                        except: pass
+                    
+                    # Fallback if AI didn't find it
+                    if not new_end:
+                        # Baseline as end of the month of (start_date or created_at)
+                        reference = c.start_date or baseline_date
+                        new_end = get_last_day_of_month(reference).date()
+                        print(f"   🔄 Falling back End Date to End of Month: {new_end}")
+
+                    if new_end:
+                        c.end_date = new_end
+                        updated = True
+                        print(f"   ✨ Repaired End Date: {c.end_date}")
                         
                 # Update Conditions if missing, corrupted or FORCE_ALL
                 if not c.conditions or c.conditions.strip() == "" or corrupted_regex.search(c.conditions) or FORCE_ALL:
