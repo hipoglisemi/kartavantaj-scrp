@@ -104,6 +104,16 @@ class GarantiShopAndFlyScraper:
     
     def _process_campaign(self, url: str) -> bool:
         """Process a single campaign page."""
+        # Database Pre-check (Skip Logic)
+        try:
+            with get_db_session() as db:
+                existing = db.query(Campaign).filter(Campaign.tracking_url == url).first()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {url}")
+                    return True
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         try:
             response = self.session.get(url, headers=self.HEADERS, timeout=15)
             response.raise_for_status()

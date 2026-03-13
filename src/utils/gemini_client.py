@@ -12,7 +12,7 @@ Kullanım:
 
 import os
 import time
-from typing import Optional
+from typing import Optional, Union
 
 # ─── Key listesini ortam değişkenlerinden oku ───────────────────────────────
 def _load_keys() -> list[str]:
@@ -68,7 +68,7 @@ def generate_with_rotation(
 
     # AI Studio / Key Rotation Mode
     keys = _load_keys()
-    last_error: Exception | None = None
+    last_error: Union[Exception, None] = None
 
     for idx, key in enumerate(keys):
         try:

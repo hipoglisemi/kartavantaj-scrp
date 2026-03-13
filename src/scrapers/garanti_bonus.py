@@ -122,6 +122,16 @@ class GarantiBonusScraper:
         Returns:
             True if successful, False otherwise
         """
+        # Database Pre-check (Skip Logic)
+        try:
+            with get_db_session() as db:
+                existing = db.query(Campaign).filter(Campaign.tracking_url == url).first()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {url}")
+                    return True  # Treat as success to avoid counting as failed
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         try:
             # Fetch campaign detail page
             response = self.session.get(url, headers=self.HEADERS, timeout=15)

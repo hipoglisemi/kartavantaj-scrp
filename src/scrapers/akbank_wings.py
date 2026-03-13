@@ -1,5 +1,5 @@
 
-import requests
+import requests # type: ignore
 import time
 from typing import List, Optional
 from urllib.parse import urljoin
@@ -11,7 +11,7 @@ project_root = os.path.dirname(os.path.dirname(current_dir))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.scrapers.akbank_base import AkbankBaseScraper
+from src.scrapers.akbank_base import AkbankBaseScraper # type: ignore
 
 class AkbankWingsScraper(AkbankBaseScraper):
     """
@@ -23,7 +23,8 @@ class AkbankWingsScraper(AkbankBaseScraper):
     WINGS_BASE_URL = "https://www.wingscard.com.tr"
     
     def __init__(self):
-        super().__init__(
+        AkbankBaseScraper.__init__(
+            self,
             card_name="Wings",
             base_url=self.WINGS_BASE_URL,
             list_url=self.WINGS_API_URL,
@@ -75,10 +76,10 @@ class AkbankWingsScraper(AkbankBaseScraper):
         print(f"✅ Found {len(campaign_urls)} campaigns for {self.card_name}")
         return campaign_urls
 
-    def _process_campaign(self, url: str):
+    def _process_campaign(self, url: str, force: bool = False) -> str:
         """Override to use Wings-specific selectors."""
-        from bs4 import BeautifulSoup
-        from src.services.ai_parser import parse_api_campaign
+        from bs4 import BeautifulSoup # type: ignore
+        from src.services.ai_parser import parse_api_campaign # type: ignore
         
         try:
             print(f"🔍 Processing: {url}")
@@ -123,14 +124,18 @@ class AkbankWingsScraper(AkbankBaseScraper):
                 short_description=title,
                 content_html=details_text,
                 bank_name="Akbank",
-                scraper_sector=None
+                scraper_sector=None,
+                tracking_url=url, # Add tracking_url for cache
+                force=force
             )
             
             # Save to DB
             self._save_campaign(title, details_text, image_url, ai_data, url)
+            return "saved"
             
         except Exception as e:
             print(f"❌ Failed to process {url}: {e}")
+            return "error"
 
 if __name__ == "__main__":
     scraper = AkbankWingsScraper()

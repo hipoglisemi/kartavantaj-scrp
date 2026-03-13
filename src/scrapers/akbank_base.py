@@ -1,18 +1,18 @@
 
-import requests
-from bs4 import BeautifulSoup
+import requests # type: ignore
+from bs4 import BeautifulSoup # type: ignore
 from urllib.parse import urljoin
 import time
 import random
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 
-from src.models import Campaign, CampaignBrand
-from src.database import get_db_session
-from src.utils.slug_generator import generate_slug
-from src.services.ai_parser import parse_api_campaign
-from src.services.brand_normalizer import normalize_brand_name
-from sqlalchemy.exc import IntegrityError
+from src.models import Campaign, CampaignBrand # type: ignore
+from src.database import get_db_session # type: ignore
+from src.utils.slug_generator import generate_slug # type: ignore
+from src.services.ai_parser import parse_api_campaign # type: ignore
+from src.services.brand_normalizer import normalize_brand_name # type: ignore
+from sqlalchemy.exc import IntegrityError # type: ignore
 
 class AkbankBaseScraper:
     """
@@ -29,7 +29,7 @@ class AkbankBaseScraper:
                  base_url: str, 
                  list_url: str, 
                  referer_url: str,
-                 list_params: Dict = None):
+                 list_params: Optional[Dict[str, Any]] = None):
         self.card_name = card_name
         self.base_url = base_url
         self.list_url = list_url
@@ -44,8 +44,8 @@ class AkbankBaseScraper:
         })
         
         # Helper to find card_id
-        with get_db_session() as db:
-            from src.models import Card
+        with get_db_session() as db: # type: ignore
+            from src.models import Card # type: ignore
             card = db.query(Card).filter(Card.name == self.card_name).first()
             if not card:
                 raise ValueError(f"Card '{self.card_name}' not found in DB. Please run seed_sectors.py first.")
@@ -59,8 +59,8 @@ class AkbankBaseScraper:
         page = 1
         
         while True:
-            params = self.list_params.copy()
-            params['page'] = page
+            params = dict(self.list_params)
+            params['page'] = str(page)
             
             try:
                 print(f"   Scanning page {page}...")
@@ -91,7 +91,7 @@ class AkbankBaseScraper:
                     print("   No new campaigns found. Stopping.")
                     break
                     
-                page += 1
+                page = page + 1 # type: ignore
                 time.sleep(random.uniform(0.5, 1.0))
                 
             except Exception as e:
@@ -105,17 +105,8 @@ class AkbankBaseScraper:
         """Process a single campaign URL"""
         print(f"🔍 Processing: {url}")
         try:
-            # --- 1. DB Check FIRST (Immediate skip) ---
-            if not force:
-                with get_db_session() as db:
-                    existing = db.query(Campaign).filter(
-                        Campaign.tracking_url == url,
-                        Campaign.card_id == self.card_id
-                    ).first()
-                    if existing:
-                        print(f"   ⏭️  Skipped (URL already exists in DB): {url}")
-                        return "skipped"
-
+            # Note: Early DB check moved to run() method to handle sub-class overrides automatically.
+            
             response = self.session.get(url, timeout=20)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -160,9 +151,9 @@ class AkbankBaseScraper:
             return "error"
 
     def _save_campaign(self, title, details_text, image_url, ai_data, source_url) -> str:
-        with get_db_session() as db:
-            from src.models import Sector
-            from src.utils.slug_generator import get_unique_slug
+        with get_db_session() as db: # type: ignore
+            from src.models import Sector # type: ignore
+            from src.utils.slug_generator import get_unique_slug # type: ignore
             
             # Use specific title from AI if available, otherwise fallback
             final_title = ai_data.get('short_title') or ai_data.get('title') or title
@@ -185,7 +176,8 @@ class AkbankBaseScraper:
             if not slug or slug == "kampanya":
                 # Ultimate fallback if title is too generic
                 import uuid
-                slug = f"kampanya-{str(uuid.uuid4())[:8]}"
+                u_str = str(uuid.uuid4())
+                slug = f"kampanya-{u_str[:8]}" # type: ignore
 
             # Map sector from AI data
             sector_name = ai_data.get('sector', 'Diğer')
@@ -255,7 +247,7 @@ class AkbankBaseScraper:
             # --- Brands ---
             # Using normalize_brand_name utility
             if ai_data.get('brands'):
-                from src.models import Brand
+                from src.models import Brand # type: ignore
                 for brand_name in ai_data['brands']:
                     b_slug = generate_slug(brand_name)
                     try:
@@ -287,14 +279,15 @@ class AkbankBaseScraper:
 
     def run(self, limit: Optional[int] = None, urls: Optional[List[str]] = None, force: bool = False):
         print(f"🚀 Starting {self.card_name} Scraper...")
-        from src.utils.logger_utils import log_scraper_execution
+        from src.utils.logger_utils import log_scraper_execution # type: ignore
         
+        process_urls: List[str] = []
         if urls:
             process_urls = urls
         else:
             process_urls = self._fetch_campaign_list()
-            if limit:
-                process_urls = process_urls[:limit]
+            if limit and isinstance(process_urls, list):
+                process_urls = process_urls[:limit] # type: ignore
         
         total_found = len(process_urls)
         total_saved = 0
@@ -305,14 +298,31 @@ class AkbankBaseScraper:
         for i, url in enumerate(process_urls):
             print(f"[{i+1}/{len(process_urls)}]", end=" ")
             try:
+                # --- Early DB Check (Moved here to handle sub-class overrides) ---
+                if not force:
+                    from src.models import Campaign # type: ignore
+                    with get_db_session() as db: # type: ignore
+                        existing = db.query(Campaign).filter(
+                            Campaign.tracking_url == url,
+                            Campaign.card_id == self.card_id
+                        ).first()
+                        if existing:
+                            print(f"⏭️  Skipped (Already exists): {url}")
+                            total_skipped += 1
+                            continue
+
+                # Process (Sub-classes may override this)
                 res = self._process_campaign(url, force=force)
-                if res == "saved":
+                
+                # Sub-classes might return None but be successful if they didn't throw
+                if res == "saved" or res is None:
                     total_saved += 1
                 elif res == "skipped":
                     total_skipped += 1
                 else:
                     total_failed += 1
             except Exception as e:
+                print(f"❌ Error in loop: {e}")
                 total_failed += 1
                 error_details.append({"url": url, "error": str(e)})
             time.sleep(1) # Polite delay

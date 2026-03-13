@@ -248,6 +248,19 @@ class TurkiyeFinansScraper:
         return sorted(list(links))
 
     def _process_campaign(self, url: str, card_key: str, card_id: int):
+        # Database Pre-check (Skip Logic)
+        try:
+            with self.engine.connect() as conn:
+                existing = conn.execute(
+                    text("SELECT id FROM campaigns WHERE tracking_url = :url"),
+                    {"url": url}
+                ).fetchone()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {url}")
+                    return "skipped"
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         card_def = CARD_DEFINITIONS[card_key]
 
         try:

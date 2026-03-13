@@ -3,19 +3,20 @@ import re
 import sys
 import time
 import json
-import requests
-import urllib3
+import requests # type: ignore
+import urllib3 # type: ignore
 import random
-from typing import List, Optional
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from bs4 import BeautifulSoup # type: ignore
+from dotenv import load_dotenv # type: ignore
 
 # Ensure src is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from sqlalchemy import create_engine, text
-from services.ai_parser import AIParser
-from services.brand_normalizer import cleanup_brands
+from sqlalchemy import create_engine, text # type: ignore
+from services.ai_parser import AIParser # type: ignore
+from services.brand_normalizer import normalize_brand_name, cleanup_brands # type: ignore
 
 load_dotenv()
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -150,6 +151,11 @@ class ChippinScraper:
         url = "https://www.chippin.com.tr/kampanyalar"
         print(f"   🌐 Fetching: {url}")
         
+        success_count = 0
+        skipped_count = 0
+        failed_count = 0
+        error_details = []
+        
         headers = {
             "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
         }
@@ -174,11 +180,6 @@ class ChippinScraper:
             
             campaigns_to_process = campaigns[:limit]
             
-            success_count = 0
-            skipped_count = 0
-            failed_count = 0
-            error_details = []
-            
             for idx, c in enumerate(campaigns_to_process):
                 title = c.get("webName")
                 if not title: continue
@@ -190,10 +191,20 @@ class ChippinScraper:
                 image_url = f"/placeholders/cp-{placeholder_idx:02d}.png"
                 
                 # Slug & URL Handling
-                # Correct pattern verified via browser: https://www.chippin.com.tr/kampanyalar/{id}
                 cid = c.get("id")
                 if not cid: continue
                 tracking_url = f"https://www.chippin.com.tr/kampanyalar/{cid}"
+
+                # Database Ops - EARLIER CHECK TO SAVE AI CALLS
+                try:
+                    with self.engine.begin() as conn:
+                        existing = conn.execute(text("SELECT id FROM campaigns WHERE tracking_url = :url"), {"url": tracking_url}).fetchone()
+                        if existing:
+                            print(f"   ⏭️ Skipped (Already exists): {tracking_url}")
+                            skipped_count += 1
+                            continue
+                except Exception as e:
+                    print(f"   ❌ DB Pre-check Error: {e}")
 
                 slug_base = slugify(title)
                 slug = f"{slug_base}-{cid}"
@@ -203,14 +214,16 @@ class ChippinScraper:
                 
                 # AI Parsing
                 ai_data = {}
-                if self.ai_parser and content_text:
+                parser = self.ai_parser
+                if parser and content_text:
                     try:
-                        ai_data = self.ai_parser.parse_campaign_data(
+                        ai_data = parser.parse_campaign_data(
                             raw_text=content_text,
                             title=title,
                             bank_name=BANK_NAME,
                             card_name=card_def["name"],
-                        )
+                            tracking_url=tracking_url
+                        ) or {}
                     except Exception as e:
                         print(f"      ⚠️  AI Error: {e}")
 
@@ -221,7 +234,8 @@ class ChippinScraper:
                     
                 eligible_cards = ai_data.get("cards")
                 eligible_str = ", ".join(eligible_cards) if eligible_cards else "Chippin"
-                if eligible_str and len(eligible_str) > 255: eligible_str = eligible_str[:255]
+                if eligible_str and len(eligible_str) > 255: 
+                    eligible_str = eligible_str[:255] # type: ignore
                     
                 conditions_lines.extend(ai_data.get("conditions", []))
                 conditions_lines = filter_conditions(conditions_lines)
@@ -239,11 +253,9 @@ class ChippinScraper:
                 except:
                     reward_val = 0.0
 
-                # Database Ops
+                # Database Ops - Insertion
                 try:
                     with self.engine.begin() as conn:
-                        existing = conn.execute(text("SELECT id FROM campaigns WHERE tracking_url = :url"), {"url": tracking_url}).fetchone()
-                        
                         campaign_data = {
                             "title": ai_data.get("title") or title,
                             "description": ai_data.get("description") or "",
@@ -252,7 +264,7 @@ class ChippinScraper:
                             "tracking_url": tracking_url,
                             "start_date": ai_data.get("start_date") or c.get("campaignStartDate"),
                             "end_date": ai_data.get("end_date") or c.get("campaignEndDate"),
-                            "sector_id": self._resolve_sector_by_name(ai_data.get("sector")) or self._resolve_sector_by_name("Diğer"),
+                            "sector_id": self._resolve_sector_by_name(str(ai_data.get("sector") or "Diğer")) or self._resolve_sector_by_name("Diğer"),
                             "card_id": card_id,
                             "conditions": "\n".join(conditions_lines) if conditions_lines else None,
                             "eligible_cards": eligible_str,
@@ -262,29 +274,24 @@ class ChippinScraper:
                             "clean_text": ai_data.get("_clean_text")
                         }
 
-                        if existing:
-                            print(f"   ⏭️ Skipped (Already exists, preserving manual edits): {campaign_data['tracking_url']}")
-                            skipped_count += 1
-                            continue
-                        else:
-                            print(f"      ✨ Creating...")
-                            result = conn.execute(text("""
-                                INSERT INTO campaigns (
-                                    title, description, slug, image_url, tracking_url, is_active,
-                                    sector_id, card_id, start_date, end_date, conditions,
-                                    eligible_cards, reward_text, reward_value, reward_type,
-                                    clean_text, created_at, updated_at
-                                )
-                                VALUES (
-                                    :title, :description, :slug, :image_url, :tracking_url, true,
-                                    :sector_id, :card_id, :start_date, :end_date, :conditions,
-                                    :eligible_cards, :reward_text, :reward_value, :reward_type,
-                                    :clean_text, NOW(), NOW()
-                                )
-                                RETURNING id
-                            """), campaign_data)
-                            campaign_id = result.fetchone()[0]
-                            success_count += 1
+                        print(f"      ✨ Creating...")
+                        result = conn.execute(text("""
+                            INSERT INTO campaigns (
+                                title, description, slug, image_url, tracking_url, is_active,
+                                sector_id, card_id, start_date, end_date, conditions,
+                                eligible_cards, reward_text, reward_value, reward_type,
+                                clean_text, created_at, updated_at
+                            )
+                            VALUES (
+                                :title, :description, :slug, :image_url, :tracking_url, true,
+                                :sector_id, :card_id, :start_date, :end_date, :conditions,
+                                :eligible_cards, :reward_text, :reward_value, :reward_type,
+                                :clean_text, NOW(), NOW()
+                            )
+                            RETURNING id
+                        """), campaign_data)
+                        campaign_id = result.fetchone()[0]
+                        success_count += 1
 
                         # Brands
                         if ai_data.get("brands") and campaign_id:
@@ -318,8 +325,8 @@ class ChippinScraper:
              status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
 
         try:
-             from src.utils.logger_utils import log_scraper_execution
-             from sqlalchemy.orm import sessionmaker
+             from src.utils.logger_utils import log_scraper_execution # type: ignore
+             from sqlalchemy.orm import sessionmaker # type: ignore
              Session = sessionmaker(bind=self.engine)
              with Session() as session:
                   log_scraper_execution(

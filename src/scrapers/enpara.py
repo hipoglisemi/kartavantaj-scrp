@@ -143,6 +143,15 @@ class EnparaScraper:
 
     def _process_campaign(self, url: str):
         """Process a single campaign detail page."""
+        # Database Pre-check (Skip Logic)
+        try:
+            existing = self.db.query(Campaign).filter(Campaign.tracking_url == url).first()
+            if existing:
+                print(f"   ⏭️ Skipped (Already exists): {url}")
+                return "skipped"
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         try:
             print(f"   Processing: {url}")
             response = self.session.get(url, headers=self.HEADERS, timeout=15)

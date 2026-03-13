@@ -325,6 +325,19 @@ class DenizbankScraper:
             return 18
 
     def _process_campaign(self, url):
+        # Database Pre-check (Skip Logic)
+        try:
+            with self.engine.connect() as conn:
+                existing = conn.execute(
+                    text("SELECT id FROM campaigns WHERE tracking_url = :url"),
+                    {"url": url}
+                ).fetchone()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {url}")
+                    return "skipped"
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         print(f"\n📄 Processing: {url}")
         html = self._fetch_html(url)
         if not html:

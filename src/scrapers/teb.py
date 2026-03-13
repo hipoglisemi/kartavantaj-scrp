@@ -260,6 +260,19 @@ class TEBScraper:
             print(f"   ⚠️  Skipping: No weblink for '{title[:40]}'")
             return "skipped"
 
+        # Database Pre-check (Skip Logic)
+        try:
+            with self.engine.connect() as conn:
+                existing = conn.execute(
+                    text("SELECT id FROM campaigns WHERE tracking_url = :url"),
+                    {"url": tracking_url}
+                ).fetchone()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {tracking_url}")
+                    return "skipped"
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         # Image: prefer rollup (larger detail image), fallback to page image
         image_url = (
             item.get("publishingRollupImageUrl") or

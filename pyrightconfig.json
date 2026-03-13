@@ -1,0 +1,13 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "src"
+    }
+  ],
+  "venvPath": ".",
+  "venv": "venv",
+  "pythonVersion": "3.9",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingTypeStubs": false
+}

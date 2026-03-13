@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: DB Connectivity Test
 
 on:
@@ -11,9 +12,9 @@ jobs:
       - name: Test PostgreSQL Connection
         env:
           DATABASE_URL: ${{ secrets['DATABASE_URL'] }}
-          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
-          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.1-flash-lite-preview' }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars['GOOGLE_CLOUD_PROJECT'] || '' }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
         run: |
           echo "Testing DB connectivity..."
           python3 -c "

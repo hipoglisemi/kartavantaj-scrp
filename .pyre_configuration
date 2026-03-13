@@ -1,0 +1,17 @@
+{
+  "source_directories": [
+    "src"
+  ],
+  "search_path": [
+    "venv/lib/python3.9/site-packages",
+    "src"
+  ],
+  "exclude": [
+    ".*/venv/.*",
+    ".*/.git/.*"
+  ],
+  "ignore_all_errors": [
+    "src/scrapers"
+  ],
+  "strict": false
+}

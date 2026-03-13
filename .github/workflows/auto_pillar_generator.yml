@@ -1,9 +1,10 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
 name: SEO Pillar Page Auto-Generator
 
 on:
   schedule:
     # Her Salı ve Perşembe Türkiye saati 10:00 (UTC 07:00)
-    - cron: '0 7 * * 2,4'
+    - cron: "0 7 * * 2,4"
   workflow_dispatch: # Manuel tetikleme (test için)
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Create Vertex Key File
-        run: echo '${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}' > vertex-key.json
+        run: echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" > vertex-key.json
 
       - name: Run Autonomous SEO Pillar Generator
         env:
@@ -33,8 +34,8 @@ jobs:
           GEMINI_API_KEY_1: ${{ secrets.GEMINI_API_KEY_1 }}
           GEMINI_API_KEY_2: ${{ secrets.GEMINI_API_KEY_2 }}
           USE_VERTEX_AI: "True"
-          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT || 'gen-lang-client-0807839854' }}
-          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION || 'us-central1' }}
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ vars.GOOGLE_CLOUD_LOCATION }}
           GOOGLE_APPLICATION_CREDENTIALS: "vertex-key.json"
           GEMINI_MODEL: "gemini-3.1-flash-lite-preview"
         run: |

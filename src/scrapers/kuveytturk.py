@@ -227,6 +227,17 @@ class KuveytTurkScraper:
         return list(active_urls), list(expired_urls)
 
     async def _scrape_single_detail(self, context, url: str, bank_id: int, card_id: int, stats: Dict) -> bool:
+        # Database Pre-check (Skip Logic)
+        try:
+            with get_db_session() as db:
+                existing = db.query(Campaign).filter(Campaign.tracking_url == url).first()
+                if existing:
+                    print(f"   ⏭️ Skipped (Already exists): {url}")
+                    stats["skipped"] += 1
+                    return True
+        except Exception as e:
+            print(f"   ⚠️ DB Pre-check error: {e}")
+
         page = await context.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
