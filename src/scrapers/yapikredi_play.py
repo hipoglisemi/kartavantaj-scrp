@@ -52,46 +52,6 @@ class YapikrediPlayScraper:
                 db.commit()
                 db.refresh(card)
             self.card = card
-        
-    def _get_or_create_bank(self) -> Bank:
-        bank = self.db.query(Bank).filter(Bank.slug == "yapi-kredi").first()
-        if not bank:
-            print(f"Creating bank: {self.BANK_NAME}")
-            bank = Bank(
-                name=self.BANK_NAME, 
-                slug="yapi-kredi", 
-                logo_url="/logos/cards/yapikredi.png",
-                is_active=True
-            )
-            self.db.add(bank)
-            self.db.commit()
-        else:
-            if not bank.logo_url:
-                bank.logo_url = "/logos/cards/yapikredi.png"
-                self.db.commit()
-                print(f"Updated bank logo: {self.BANK_NAME}")
-        return bank
-
-    def _get_or_create_card(self) -> Card:
-        card = self.db.query(Card).filter(Card.slug == "play", Card.bank_id == self.bank.id).first()
-        if not card:
-            print(f"Creating card: {self.CARD_NAME}")
-            card = Card(
-                name=self.CARD_NAME,
-                bank_id=self.bank.id,
-                slug="play",
-                card_type="credit",
-                logo_url="/logos/cards/yapikrediplay.png",
-                is_active=True
-            )
-            self.db.add(card)
-            self.db.commit()
-        else:
-             if not card.logo_url:
-                card.logo_url = "/logos/cards/yapikrediplay.png"
-                self.db.commit()
-                print(f"Updated card logo: {self.CARD_NAME}")
-        return card
 
     def _fetch_list(self, page: int) -> List[Dict[str, Any]]:
         headers = {
@@ -130,31 +90,28 @@ class YapikrediPlayScraper:
 
         print(f"   Processing: {title}")
         
-        # ========== API-FIRST APPROACH ==========
-        # 1. Extract fields DIRECTLY from API response (no HTML fetch needed!)
         api_image_url = item.get('ImageUrl')
         if api_image_url and not api_image_url.startswith('http'):
             api_image_url = f"{self.BASE_URL}{api_image_url}"
         
         short_description = item.get('ShortDescription') or ''
         content_html = item.get('Content') or ''
-        start_date_str = item.get('StartDate')  # "2026-02-01T00:00:00"
-        end_date_str = item.get('EndDate')      # "2026-02-28T00:00:00"
+        start_date_str = item.get('StartDate')
+        end_date_str = item.get('EndDate')
         
-        # 2. Parse dates from API (guaranteed accurate — no AI guessing!)
         start_date = self._parse_iso_date(start_date_str)
         end_date = self._parse_iso_date(end_date_str)
         
-        # 3. Call Gemini with ONLY title + description + content (lightweight!)
+        scraper_sector = item.get('Category') or item.get('Type') or item.get('SectorName') or None
+        
         ai_result = parse_api_campaign(
             title=title,
             short_description=short_description,
             content_html=content_html,
-            bank_name=self.BANK_NAME
+            bank_name=self.BANK_NAME,
+            scraper_sector=scraper_sector
         )
         
-        # 4. Save: API data + AI enrichment
-        # Use AI's short_title for display, keep original API title in details_text
         display_title = ai_result.get('short_title') or title
         
         return self._save_campaign(
@@ -186,7 +143,7 @@ class YapikrediPlayScraper:
                 campaign = Campaign(
                     slug=slug,
                     title=title,
-                    card_id=self.card.id,
+                    card_id=self.card.id if self.card else None,
                     sector_id=sector_id,
                     reward_value=ai_data.get('reward_value'),
                     reward_type=ai_data.get('reward_type'),
@@ -232,17 +189,7 @@ class YapikrediPlayScraper:
             print(f"   ❌ Error saving: {e}")
             return "error"
 
-    def _generate_slug(self, title: str) -> str:
-        # Basic slugify
-        import re
-        text = title.lower()
-        text = text.replace('ı', 'i').replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ö', 'o').replace('ç', 'c')
-        text = re.sub(r'[^a-z0-9\s-]', '', text)
-        text = re.sub(r'[\s-]+', '-', text).strip('-')
-        return f"{text}-{int(time.time())}"
-
     def _parse_iso_date(self, date_str: Optional[str]) -> Optional[datetime]:
-        """Parse ISO date from API response (e.g., '2026-02-01T00:00:00')"""
         if not date_str:
             return None
         try:
@@ -262,7 +209,6 @@ class YapikrediPlayScraper:
         while True:
             items = self._fetch_list(page)
             if not items:
-                print("   No more items or error.")
                 break
                 
             print(f"   Found {len(items)} items on page {page}")
@@ -270,12 +216,10 @@ class YapikrediPlayScraper:
             
             active_count = 0
             for item in items:
-
                 # Filter expired
                 end_date_str = item.get('EndDate')
                 if end_date_str:
                     try:
-                        # 2026-02-28T00:00:00
                         end_date = datetime.fromisoformat(end_date_str)
                         if end_date < datetime.now():
                             continue
@@ -291,14 +235,12 @@ class YapikrediPlayScraper:
                         skipped_count += 1
                     else:
                         failed_count += 1
-                        error_details.append({"url": item.get('Url', 'unknown'), "error": "Unknown DB failure"})
                 except Exception as e:
                     print(f"❌ Error processing item: {e}")
                     failed_count += 1
                     error_details.append({"url": item.get('Url', 'unknown'), "error": str(e)})
             
             if active_count == 0 and len(items) > 0:
-                print("   All items on this page are expired. Stopping.")
                 break
                 
             page += 1
@@ -315,7 +257,7 @@ class YapikrediPlayScraper:
                 from src.utils.logger_utils import log_scraper_execution
                 log_scraper_execution(
                      db=db,
-                     scraper_name="yapikredi-play",
+                     scraper_name=f"yapikredi-{self.CARD_NAME.lower()}",
                      status=status,
                      total_found=total_found,
                      total_saved=success_count,
@@ -326,7 +268,6 @@ class YapikrediPlayScraper:
         except Exception as le:
              print(f"⚠️ Could not save scraper log: {le}")
         
-        # Clear cache so new campaigns appear immediately
         print("🧹 Clearing API cache...")
         clear_cache('campaigns:*')
         clear_cache('cards:*')

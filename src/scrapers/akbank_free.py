@@ -15,7 +15,8 @@ class AkbankFreeScraper(AkbankBaseScraper):
     Scraper for Akbank Free Card campaigns.
     """
     def __init__(self):
-        super().__init__(
+        AkbankBaseScraper.__init__(
+            self,
             card_name="Axess Free",
             base_url="https://www.kartfree.com",
             list_url="https://www.kartfree.com/ajax/kampanya-ajax-free.aspx",
