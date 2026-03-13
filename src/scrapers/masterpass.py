@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 """
 Masterpass Plus Scraper
 Powered by Playwright

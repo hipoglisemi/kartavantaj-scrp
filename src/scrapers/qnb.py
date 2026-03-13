@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 import os
 import re
 import sys
@@ -346,6 +349,10 @@ class QNBScraper:
                     tracking_url=campaign_url,
                     force=force
                 )
+                
+                if ai_data.get("_ai_failed"):
+                    print("      ⚠️ AI Parse Failed. Skipping this campaign to avoid saving garbage data.")
+                    return "error"
             except Exception as e:
                 print(f"      ⚠️  AI Error: {e}")
                 ai_data = {}

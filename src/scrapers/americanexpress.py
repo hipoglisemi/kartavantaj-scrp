@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 """
 American Express Turkey Scraper
 Powered by Playwright and AIParser

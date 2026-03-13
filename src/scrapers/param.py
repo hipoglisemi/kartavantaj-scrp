@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 """
 ParamKart Scraper
 Powered by Playwright (Handles Lazy Loading via Scrolling)

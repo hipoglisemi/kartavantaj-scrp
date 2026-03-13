@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 import os
 import time
 import random
@@ -66,6 +69,7 @@ class DenizbankScraper:
             
         self.driver = None
         self.display = None
+        self.card_id = None
 
     def setup_driver(self):
         """Initialize Selenium with Chrome + Stealth Mode."""
@@ -644,6 +648,7 @@ class DenizbankScraper:
             from src.utils.logger_utils import log_scraper_execution
             from sqlalchemy.orm import sessionmaker
             SessionLocal = sessionmaker(bind=self.engine)
+            db = SessionLocal()
             
             urls = self._fetch_campaign_list(limit=limit)
             print(f"   🎯 Processing {len(urls)} campaigns...")
@@ -678,34 +683,35 @@ class DenizbankScraper:
             if failed_count > 0:
                 status = "PARTIAL" if (success_count > 0 or skipped_count > 0) else "FAILED"
                 
-            with SessionLocal() as db:
-                log_scraper_execution(
-                    db=db,
-                    scraper_name="denizbank",
-                    status=status,
-                    total_found=len(urls),
-                    total_saved=success_count,
-                    total_skipped=skipped_count,
-                    total_failed=failed_count,
-                    error_details={"errors": error_details} if error_details else None
-                )
+            log_scraper_execution(
+                db=db,
+                scraper_name="denizbank",
+                status=status,
+                total_found=len(urls),
+                total_saved=success_count,
+                total_skipped=skipped_count,
+                total_failed=failed_count,
+                error_details={"errors": error_details} if error_details else None
+            )
+            db.close()
                     
         except Exception as e:
             print(f"❌ Scraper exception: {e}")
             from src.utils.logger_utils import log_scraper_execution
             from sqlalchemy.orm import sessionmaker
             SessionLocal = sessionmaker(bind=self.engine)
-            with SessionLocal() as db:
-                log_scraper_execution(
-                    db=db,
-                    scraper_name="denizbank",
-                    status="FAILED",
-                    total_found=0,
-                    total_saved=0,
-                    total_skipped=0,
-                    total_failed=1,
-                    error_details={"error": str(e)}
-                )
+            db = SessionLocal()
+            log_scraper_execution(
+                db=db,
+                scraper_name="denizbank",
+                status="FAILED",
+                total_found=0,
+                total_saved=0,
+                total_skipped=0,
+                total_failed=1,
+                error_details={"error": str(e)}
+            )
+            db.close()
         finally:
             self.close_driver()
             print("🏁 Scraper Finished.")

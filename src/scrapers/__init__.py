@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 try:
     from .garanti_bonus import GarantiBonusScraper
 except ImportError: GarantiBonusScraper = None

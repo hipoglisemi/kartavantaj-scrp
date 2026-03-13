@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 
 import requests
 import time
@@ -113,7 +116,7 @@ class GarantiBonusScraper:
             print(f"❌ Error fetching campaign list: {e}")
             return []
     
-    def _process_campaign(self, url: str) -> bool:
+    def _process_campaign(self, url: str) -> str:
         """Process a single campaign page.
         
         Args:

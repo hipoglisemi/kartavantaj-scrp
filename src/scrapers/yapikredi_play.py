@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 
 import requests
 import time

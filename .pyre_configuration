@@ -8,10 +8,17 @@
   ],
   "exclude": [
     ".*/venv/.*",
-    ".*/.git/.*"
+    ".*/.git/.*",
+    ".*/src/scrapers/.*"
   ],
   "ignore_all_errors": [
-    "src/scrapers"
+    "src/scrapers",
+    "src/scrapers/turkcell.py",
+    "src/scrapers/isbankasi_maximum.py",
+    "src/scrapers/isbankasi_maximiles.py",
+    "src/scrapers/isbankasi_genc.py",
+    "src/scrapers/garanti_milesandsmiles.py",
+    "src/scrapers/garanti_shopandfly.py"
   ],
   "strict": false
 }

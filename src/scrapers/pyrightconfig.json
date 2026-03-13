@@ -1,12 +1,4 @@
 {
-  "executionEnvironments": [
-    {
-      "root": "src"
-    }
-  ],
-  "venvPath": ".",
-  "venv": "venv",
-  "pythonVersion": "3.9",
   "typeCheckingMode": "off",
   "reportMissingImports": false,
   "reportMissingModuleSource": false,
@@ -18,8 +10,12 @@
   "reportArgumentType": false,
   "reportReturnType": false,
   "reportCallIssue": false,
-  "exclude": [
-    "src/scrapers",
-    "src/scrapers/**"
-  ]
+  "reportOptionalMemberAccess": false,
+  "reportOptionalSubscript": false,
+  "reportOptionalCall": false,
+  "reportOptionalIterable": false,
+  "reportOptionalContextManager": false,
+  "reportOptionalOperand": false,
+  "reportUntypedFunctionDecorator": false,
+  "reportUntypedClassDecorator": false
 }

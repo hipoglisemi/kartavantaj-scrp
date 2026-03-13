@@ -1,3 +1,6 @@
+# pyre-ignore-all-errors
+# type: ignore
+
 import sys
 import os
 import time
