@@ -96,7 +96,7 @@ class QNBScraper:
         """Fetch all campaigns from QNB API using pagination."""
         print(f"   🌐 Fetching campaigns from QNB API with pagination...")
         all_items = []
-        page_index = 0
+        page_index = 1
         take = 12 # QNB default page size
         
         try:
@@ -109,10 +109,17 @@ class QNBScraper:
                     "keyword": "",
                     "year": "",
                     "month": "",
-                    "take": str(take),
-                    "PageIndex": str(page_index)
+                    "take": str(take)
                 }
-                response = requests.get(API_URL, params=params, headers=HEADERS, timeout=30)
+                # QNB API uses a custom header 'page' for pagination, NOT a query parameter!
+                headers = HEADERS.copy()
+                headers.update({
+                    "page": str(page_index),
+                    "x-bone-language": "TR",
+                    "x-requested-with": "XMLHttpRequest"
+                })
+                
+                response = requests.get(API_URL, params=params, headers=headers, timeout=30)
                 response.raise_for_status()
                 data = response.json()
 
@@ -123,17 +130,17 @@ class QNBScraper:
                 all_items.extend(items)
                 total = data.get("TotalItems", 0)
                 
-                print(f"      📄 Fetched page {page_index + 1} ({len(items)} items). Total so far: {len(all_items)}/{total}")
+                print(f"      📄 Fetched page {page_index} ({len(items)} items). Total so far: {len(all_items)}/{total}")
                 
                 # If we've fetched everything or reached limit
                 if len(all_items) >= total or (limit and len(all_items) >= limit):
                     break
                     
-                page_index += 1
+                page_index += 1 # type: ignore
                 time.sleep(0.5) # small delay between pages
                 
             print(f"   ✅ API returned a total of {len(all_items)} campaigns")
-            return all_items[:limit] if limit else all_items
+            return all_items[:limit] if limit else all_items # type: ignore
             
         except Exception as e:
             print(f"   ❌ API fetch failed: {e}")
