@@ -93,30 +93,51 @@ class QNBScraper:
         return self._fetch_campaigns_from_api(limit=1000)
 
     def _fetch_campaigns_from_api(self, limit=1000) -> list:
-        """Fetch all campaigns from QNB API in a single request."""
-        print(f"   🌐 Fetching campaigns from QNB API...")
+        """Fetch all campaigns from QNB API using pagination."""
+        print(f"   🌐 Fetching campaigns from QNB API with pagination...")
+        all_items = []
+        page_index = 0
+        take = 12 # QNB default page size
+        
         try:
-            params = {
-                "isArchived": "false",
-                "sectorId": "",
-                "brandId": "",
-                "categoryId": "",
-                "keyword": "",
-                "year": "",
-                "month": "",
-                "take": str(limit),
-            }
-            response = requests.get(API_URL, params=params, headers=HEADERS, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            while True:
+                params = {
+                    "isArchived": "false",
+                    "sectorId": "",
+                    "brandId": "",
+                    "categoryId": "",
+                    "keyword": "",
+                    "year": "",
+                    "month": "",
+                    "take": str(take),
+                    "PageIndex": str(page_index)
+                }
+                response = requests.get(API_URL, params=params, headers=HEADERS, timeout=30)
+                response.raise_for_status()
+                data = response.json()
 
-            items = data.get("Items", [])
-            total = data.get("TotalItems", 0)
-            print(f"   ✅ API returned {len(items)} campaigns (Total: {total})")
-            return items
+                items = data.get("Items", [])
+                if not items:
+                    break
+                    
+                all_items.extend(items)
+                total = data.get("TotalItems", 0)
+                
+                print(f"      📄 Fetched page {page_index + 1} ({len(items)} items). Total so far: {len(all_items)}/{total}")
+                
+                # If we've fetched everything or reached limit
+                if len(all_items) >= total or (limit and len(all_items) >= limit):
+                    break
+                    
+                page_index += 1
+                time.sleep(0.5) # small delay between pages
+                
+            print(f"   ✅ API returned a total of {len(all_items)} campaigns")
+            return all_items[:limit] if limit else all_items
+            
         except Exception as e:
             print(f"   ❌ API fetch failed: {e}")
-            return []
+            return all_items
 
     def _get_or_create_bank_and_card(self):
         """Find or create QNB and QNBCard."""
