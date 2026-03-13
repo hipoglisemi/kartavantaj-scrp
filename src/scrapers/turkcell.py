@@ -94,7 +94,7 @@ class TurkcellScraper:
                 print(f"   Found {total_found} campaigns in total.")
                 
                 if links and self.max_campaigns:
-                    links = links[:self.max_campaigns]
+                    links = cast(List[str], links)[:self.max_campaigns] # type: ignore
                 
                 for i, url in enumerate(links, 1):
                     try:
@@ -202,7 +202,7 @@ class TurkcellScraper:
                     if text.strip():
                         content_parts.append(f"### {header_text}\n{text}")
                         if any(x in header_text.lower() for x in ["katılım", "faydalan", "nasıl"]):
-                            participation_text += f"\n{text}"
+                            participation_text += f"\n{text}" # type: ignore
                 except:
                     pass
 

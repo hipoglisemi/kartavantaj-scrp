@@ -230,11 +230,11 @@ class YapikrediWorldScraper:
                 try:
                     res = self._process_item(item)
                     if res == "saved":
-                        success_count += 1
+                        success_count += 1 # type: ignore
                     elif res == "skipped":
-                        skipped_count += 1
+                        skipped_count += 1 # type: ignore
                     else:
-                        failed_count += 1
+                        failed_count += 1 # type: ignore
                 except Exception as e:
                     print(f"❌ Error processing item: {e}")
                     failed_count += 1

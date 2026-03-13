@@ -8,7 +8,10 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
-from src.scrapers.akbank_base import AkbankBaseScraper
+try:
+    from src.scrapers.akbank_base import AkbankBaseScraper
+except ImportError:
+    from akbank_base import AkbankBaseScraper # type: ignore
 
 class AkbankAxessScraper(AkbankBaseScraper):
     """

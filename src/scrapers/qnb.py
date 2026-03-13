@@ -87,7 +87,7 @@ class QNBScraper:
                 page_index += 1
                 time.sleep(0.5)
                 
-            return all_items[:limit] if limit else all_items
+            return all_items[:limit] if limit else all_items # type: ignore
         except Exception as e:
             print(f"   ❌ API fetch failed: {e}")
             return all_items
@@ -132,6 +132,8 @@ class QNBScraper:
                 if item.get("Id") and item.get("HasImage"):
                     image_url = f"{self.BASE_URL}/medium/Campaign-DetailImage-{item.get('Id')}.vsf"
 
+                slug = get_unique_slug(ai_data.get('short_title') or ai_data.get('title'), db, Campaign)
+                
                 if not self.card_id:
                     return "error"
                     
@@ -189,11 +191,11 @@ class QNBScraper:
             try:
                 res = self._process_item(item)
                 if res == "saved":
-                    success += 1
+                    success += 1 # type: ignore
                 elif res == "skipped":
-                    skipped += 1
+                    skipped += 1 # type: ignore
                 else:
-                    failed += 1
+                    failed += 1 # type: ignore
             except Exception as e:
                 failed += 1
                 error_details.append({"url": str(item.get("Id")), "error": str(e)})
