@@ -1,3 +1,5 @@
+# pyre-ignore-all-errors
+# type: ignore
 
 import sys
 import os
@@ -10,9 +12,9 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright, Page
-from bs4 import BeautifulSoup
-from sqlalchemy.orm import Session
+from playwright.async_api import async_playwright, Page # type: ignore
+from bs4 import BeautifulSoup # type: ignore
+from sqlalchemy.orm import Session # type: ignore
 
 # Path setup to ensure imports work correctly
 project_root = "/Users/hipoglisemi/Desktop/kartavantaj-scraper"
