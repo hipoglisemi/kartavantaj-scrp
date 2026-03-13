@@ -56,7 +56,7 @@ class KuveytTurkScraper:
         """Main async execution flow"""
         print(f"🚀 Starting {self.BANK_NAME} Scraper...")
         start_time = time.time()
-        stats = {'total': 0, 'new': 0, 'updated': 0, 'failed': 0}
+        stats = {'total': 0, 'new': 0, 'updated': 0, 'failed': 0, 'skipped': 0}
         
         try:
             self.db = get_db_session()
@@ -115,7 +115,7 @@ class KuveytTurkScraper:
                 
             elapsed = time.time() - start_time
             print(f"\n🎉 {self.BANK_NAME} scraping completed in {elapsed:.1f}s")
-            print(f"📊 Stats: {stats['total']} processed | {stats['new']} new | {stats['updated']} updated | {stats['failed']} failed")
+            print(f"📊 Stats: {stats['total']} processed | {stats['new']} new | {stats['updated']} updated | {stats.get('skipped', 0)} skipped | {stats['failed']} failed")
             
             log_scraper_execution(
                 db=self.db,
@@ -123,7 +123,8 @@ class KuveytTurkScraper:
                 status="COMPLETED",
                 total_found=stats['total'],
                 total_saved=stats['new'] + stats['updated'],
-                total_failed=stats['failed']
+                total_failed=stats['failed'],
+                total_skipped=stats.get('skipped', 0)
             )
 
         except Exception as e:
@@ -233,7 +234,7 @@ class KuveytTurkScraper:
                 existing = db.query(Campaign).filter(Campaign.tracking_url == url).first()
                 if existing:
                     print(f"   ⏭️ Skipped (Already exists): {url}")
-                    stats["skipped"] += 1
+                    stats["skipped"] = stats.get("skipped", 0) + 1
                     return True
         except Exception as e:
             print(f"   ⚠️ DB Pre-check error: {e}")
